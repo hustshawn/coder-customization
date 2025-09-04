@@ -1,0 +1,6 @@
+
+
+Example templates:
+
+1. Official one: https://github.com/coder/coder/tree/main/examples/templates
+2. Community Example: https://github.com/bpmct/coder-templates
