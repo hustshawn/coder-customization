@@ -18,7 +18,7 @@ data "coder_parameter" "region" {
   name         = "region"
   display_name = "Region"
   description  = "The region to deploy the workspace in."
-  default      = "us-east-1"
+  default      = "us-west-2"
   mutable      = false
   option {
     name  = "Asia Pacific (Tokyo)"
@@ -137,6 +137,46 @@ data "coder_parameter" "instance_type" {
     name  = "8 vCPU, 32 GiB RAM"
     value = "t3.2xlarge"
   }
+  option {
+    name  = "g6e.12xlarge - 4xL40S"
+    value = "g6e.12xlarge"
+  }
+  option {
+    name  = "p5.4xlarge - 1xH100"
+    value = "p5.4xlarge"
+  }
+}
+
+data "coder_parameter" "disk_size" {
+  name         = "disk_size"
+  display_name = "Disk Size"
+  description  = "How much disk space should your workspace have?"
+  default      = "20"
+  mutable      = false
+  option {
+    name  = "20 GiB"
+    value = "20"
+  }
+  option {
+    name  = "50 GiB"
+    value = "50"
+  }
+  option {
+    name  = "100 GiB"
+    value = "100"
+  }
+  option {
+    name  = "200 GiB"
+    value = "200"
+  }
+  option {
+    name  = "500 GiB"
+    value = "500"
+  }
+  option {
+    name  = "1000 GiB (1 TiB)"
+    value = "1000"
+  }
 }
 
 provider "aws" {
@@ -157,6 +197,30 @@ data "aws_ami" "ubuntu" {
     values = ["hvm"]
   }
   owners = ["099720109477"] # Canonical
+}
+
+data "aws_ami" "gpu_optimized" {
+  most_recent = true
+  filter {
+    name   = "name"
+    values = ["Deep Learning OSS Nvidia Driver AMI GPU PyTorch*"]
+  }
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+  owners = ["amazon"]
+}
+
+locals {
+  # Define GPU instance types
+  gpu_instance_types = ["g6e.12xlarge", "p5.4xlarge"]
+
+  # Check if selected instance type is a GPU instance
+  is_gpu_instance = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
+
+  # Select appropriate AMI based on instance type
+  selected_ami_id = local.is_gpu_instance ? data.aws_ami.gpu_optimized.id : data.aws_ami.ubuntu.id
 }
 
 resource "coder_agent" "dev" {
@@ -205,19 +269,17 @@ module "code-server" {
   order    = 1
 }
 
-# See https://registry.coder.com/modules/coder/jetbrains
-module "jetbrains" {
-  count      = data.coder_workspace.me.start_count
-  source     = "registry.coder.com/coder/jetbrains/coder"
-  version    = "~> 1.0"
-  agent_id   = coder_agent.dev[0].id
-  agent_name = "dev"
-  folder     = "/home/coder"
+
+module "kiro" {
+  count    = data.coder_workspace.me.start_count
+  source   = "registry.coder.com/coder/kiro/coder"
+  version  = "1.0.0"
+  agent_id = coder_agent.dev[0].id
 }
 
 locals {
   hostname   = lower(data.coder_workspace.me.name)
-  linux_user = "coder"
+  linux_user = local.is_gpu_instance ? "ec2-user" : "coder"
 }
 
 data "cloudinit_config" "user_data" {
@@ -249,9 +311,14 @@ data "cloudinit_config" "user_data" {
 }
 
 resource "aws_instance" "dev" {
-  ami               = data.aws_ami.ubuntu.id
-  availability_zone = "${data.coder_parameter.region.value}a"
-  instance_type     = data.coder_parameter.instance_type.value
+  ami           = local.selected_ami_id
+  instance_type = data.coder_parameter.instance_type.value
+
+  root_block_device {
+    volume_type = "gp3"
+    volume_size = data.coder_parameter.disk_size.value
+    encrypted   = true
+  }
 
   user_data = data.cloudinit_config.user_data.rendered
   tags = {
