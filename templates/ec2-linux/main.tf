@@ -203,11 +203,15 @@ data "aws_ami" "gpu_optimized" {
   most_recent = true
   filter {
     name   = "name"
-    values = ["Deep Learning OSS Nvidia Driver AMI GPU PyTorch*"]
+    values = ["Deep Learning Base GPU AMI (Ubuntu 20.04)*"]
   }
   filter {
     name   = "virtualization-type"
     values = ["hvm"]
+  }
+  filter {
+    name   = "state"
+    values = ["available"]
   }
   owners = ["amazon"]
 }
@@ -303,9 +307,9 @@ data "cloudinit_config" "user_data" {
     content_type = "text/x-shellscript"
 
     content = templatefile("${path.module}/cloud-init/userdata.sh.tftpl", {
-      linux_user = local.linux_user
-
-      init_script = try(coder_agent.dev[0].init_script, "")
+      linux_user      = local.linux_user
+      is_gpu_instance = local.is_gpu_instance
+      init_script     = try(coder_agent.dev[0].init_script, "")
     })
   }
 }
@@ -344,6 +348,13 @@ resource "coder_metadata" "workspace_info" {
   item {
     key   = "disk"
     value = "${aws_instance.dev.root_block_device[0].volume_size} GiB"
+  }
+  dynamic "item" {
+    for_each = local.is_gpu_instance ? [1] : []
+    content {
+      key   = "nvme storage"
+      value = "RAID0 configured (available at ~/nvme-storage)"
+    }
   }
 }
 
