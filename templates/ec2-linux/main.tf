@@ -234,6 +234,16 @@ resource "coder_agent" "dev" {
   os             = "linux"
   startup_script = <<-EOT
     set -e
+    
+    # Ensure pipx is in PATH (should be installed by cloud-init)
+    export PATH="$HOME/.local/bin:$PATH"
+    
+    # Verify pipx is available
+    if command -v pipx &> /dev/null; then
+        echo "✅ pipx is ready"
+    else
+        echo "❌ pipx not found - this will cause module failures"
+    fi
 
     # Add any commands that should be executed at workspace startup (e.g install requirements, start a program, etc) here
   EOT
@@ -278,6 +288,13 @@ module "kiro" {
   count    = data.coder_workspace.me.start_count
   source   = "registry.coder.com/coder/kiro/coder"
   version  = "1.0.0"
+  agent_id = coder_agent.dev[0].id
+}
+
+module "jupyter-notebook" {
+  count    = data.coder_workspace.me.start_count
+  source   = "registry.coder.com/coder/jupyter-notebook/coder"
+  version  = "1.2.0"
   agent_id = coder_agent.dev[0].id
 }
 

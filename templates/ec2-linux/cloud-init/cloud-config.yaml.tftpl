@@ -6,3 +6,16 @@ users:
   - name: ${linux_user}
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
+
+# Install required packages early
+packages:
+  - python3-pip
+  - python3-setuptools
+  - python3-venv
+  - python3.8-venv
+
+# Ensure pip is properly available
+runcmd:
+  - apt-get update || yum update -y || true
+  - which pip3 || (apt-get install -y python3-pip || yum install -y python3-pip)
+  - apt-get install -y python3.8-venv || yum install -y python38-devel || true

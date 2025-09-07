@@ -159,6 +159,41 @@ fi
 
 %{ endif }
 
+
+echo "Installing pipx for user ${linux_user} before Coder agent starts..."
+
+# Ensure user home directory exists
+if [ ! -d "/home/${linux_user}" ]; then
+    mkdir -p "/home/${linux_user}"
+    chown "${linux_user}:${linux_user}" "/home/${linux_user}"
+fi
+
+# Install pipx for the user and ensure it's in PATH globally
+sudo -u '${linux_user}' bash -c '
+    # Install pipx
+    python3 -m pip install --user pipx
+    export PATH="$HOME/.local/bin:$PATH"
+    pipx ensurepath
+    
+    # Add to bashrc to ensure it persists
+    echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.bashrc
+    
+    # Verify installation
+    if command -v pipx &> /dev/null; then
+        echo "✅ pipx installed successfully for user ${linux_user}"
+        pipx --version
+    else
+        echo "❌ pipx installation failed"
+        exit 1
+    fi
+'
+
+# Also create a system-wide link for pipx
+if [ -f "/home/${linux_user}/.local/bin/pipx" ]; then
+    ln -sf "/home/${linux_user}/.local/bin/pipx" "/usr/local/bin/pipx"
+    echo "✅ pipx linked globally"
+fi
+
 echo "Running Coder agent initialization script..."
 
 # Run the Coder agent initialization script
