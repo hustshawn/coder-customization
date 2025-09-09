@@ -22,11 +22,13 @@ Provision AWS EC2 instances as persistent Coder workspaces with the following fe
 - **Persistent workspaces** - Full filesystem preservation across restarts
 
 **Supported Regions:**
+
 - Asia Pacific: Tokyo 🇯🇵, Jakarta 🇮🇩, Mumbai 🇮🇳, Singapore 🇸🇬, Sydney 🇦🇺
 - Europe: Ireland 🇪🇺
 - US: N. Virginia, Ohio, Oregon 🇺🇸
 
 **Supported Instance Types:**
+
 - General purpose: t3.micro to t3.2xlarge
 - GPU instances: g6e.12xlarge (4xL40S), p5.4xlarge (1xH100)
 
@@ -45,6 +47,18 @@ Provision AWS EC2 instances as persistent Coder workspaces with the following fe
 3. Upload the template directory or point to this repository
 4. Configure the template parameters according to your needs
 5. Create workspaces from the template
+
+### Updating Template Icons
+
+To update the icon for an existing template, use the Coder CLI:
+
+```bash
+coder templates edit "<template-name>" --icon /icon/aws.svg
+```
+
+Available icons can be found at `https://<coder-server>/icons` where `<coder-server>` is your Coder instance URL.
+
+This allows you to customize the visual appearance of your templates in the Coder dashboard.
 
 ### AWS Authentication
 
