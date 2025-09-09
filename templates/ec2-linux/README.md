@@ -80,15 +80,31 @@ instances provisioned by Coder:
 
 This template provisions the following resources:
 
-- AWS Instance
+- AWS EC2 Instance with configurable instance types and storage
+- Cloud-init configuration for automated setup
+- Smart AMI selection (standard Ubuntu or GPU-optimized based on instance type)
 
-Coder uses `aws_ec2_instance_state` to start and stop the VM. This example template is fully persistent, meaning the full filesystem is preserved when the workspace restarts. See this [community example](https://github.com/bpmct/coder-templates/tree/main/aws-linux-ephemeral) of an ephemeral AWS instance.
+Coder uses `aws_ec2_instance_state` to start and stop the VM. This template is fully persistent, meaning the full filesystem is preserved when the workspace restarts.
+
+## Features
+
+### Multi-Region Support
+The template supports deployment across multiple AWS regions with intuitive country flag icons:
+- **Asia Pacific**: Tokyo 🇯🇵, Jakarta 🇮🇩, Mumbai 🇮🇳, Singapore 🇸🇬, Sydney 🇦🇺
+- **Europe**: Ireland 🇪🇺  
+- **US**: N. Virginia, Ohio, Oregon 🇺🇸
+
+### Instance Types
+- **General Purpose**: t3.micro (2 vCPU, 1GB) to t3.2xlarge (8 vCPU, 32GB)
+- **GPU Instances**: g6e.12xlarge (4xL40S), p5.4xlarge (1xH100)
+
+### Storage Options
+Configurable EBS storage from 20GB to 1TB with GP3 volumes and encryption enabled by default.
+
+### Pre-installed Development Tools
+- **Code Server**: Web-based VS Code accessible through the dashboard
+- **Kiro IDE**: Advanced AI-powered development environment
+- **Jupyter Notebook**: For data science and machine learning workflows
 
 > **Note**
 > This template is designed to be a starting point! Edit the Terraform to extend the template to support your use case.
-
-## code-server
-
-`code-server` is installed via the `startup_script` argument in the `coder_agent`
-resource block. The `coder_app` resource is defined to access `code-server` through
-the dashboard UI over `localhost:13337`.

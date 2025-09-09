@@ -14,12 +14,17 @@ This repository contains production-ready Coder templates that help you quickly 
 
 Provision AWS EC2 instances as persistent Coder workspaces with the following features:
 
-- **Multi-region support** - Deploy in any AWS region
+- **Multi-region support** - Deploy in multiple AWS regions with country flag icons
 - **Flexible instance types** - From t3.micro to GPU instances (g6e.12xlarge, p5.4xlarge)
 - **Configurable storage** - 20GB to 1TB disk options
 - **Smart AMI selection** - Automatically uses GPU-optimized AMIs for GPU instances
-- **Pre-installed tools** - Code Server and Kiro IDE
+- **Pre-installed tools** - Code Server, Kiro IDE, and Jupyter Notebook
 - **Persistent workspaces** - Full filesystem preservation across restarts
+
+**Supported Regions:**
+- Asia Pacific: Tokyo 🇯🇵, Jakarta 🇮🇩, Mumbai 🇮🇳, Singapore 🇸🇬, Sydney 🇦🇺
+- Europe: Ireland 🇪🇺
+- US: N. Virginia, Ohio, Oregon 🇺🇸
 
 **Supported Instance Types:**
 - General purpose: t3.micro to t3.2xlarge
