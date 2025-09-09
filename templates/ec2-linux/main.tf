@@ -27,7 +27,7 @@ data "coder_parameter" "region" {
   }
   option {
     name  = "Asia Pacific (Jakarta)"
-    value = "ap-northeast-3"
+    value = "ap-southeast-3"
     icon  = "/emojis/1f1ee-1f1e9.png"
   }
   # option {
