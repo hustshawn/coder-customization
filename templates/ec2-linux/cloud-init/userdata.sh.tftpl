@@ -1,205 +1,95 @@
 #!/bin/bash
+set -e
+exec > >(tee /var/log/user-data.log) 2>&1
 
-set -e  # Exit on any error
-exec > >(tee /var/log/user-data.log) 2>&1  # Log all output
+echo "=== User Data Script Started $(date) ==="
 
-echo "Starting user-data script execution..."
+# Set variables safely
+LINUX_USER="${linux_user}"
+IS_GPU_INSTANCE="${is_gpu_instance}"
+NEEDS_NVME_RAID="${needs_nvme_raid}"
+INSTANCE_TYPE=$(curl -s http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo "unknown")
 
-%{ if is_gpu_instance }
-# Configure RAID0 for NVMe drives on GPU instances
-setup_nvme_raid() {
-    echo "Setting up NVMe RAID0 configuration..."
+echo "Linux user: $LINUX_USER"
+echo "Instance Type: $INSTANCE_TYPE"
+
+%{ if needs_nvme_raid }
+# Quick NVME setup for GPU instances
+if [[ "$NEEDS_NVME_RAID" == "true" ]]; then
+    echo "Setting up NVMe storage..."
+    apt-get update && apt-get install -y mdadm || yum install -y mdadm || true
     
-    # Wait for system to be ready
-    sleep 10
-    
-    # Install mdadm if not present
-    if ! command -v mdadm &> /dev/null; then
-        echo "Installing mdadm..."
-        if command -v yum &> /dev/null; then
-            yum update -y || echo "Warning: yum update failed, continuing..."
-            yum install -y mdadm || { echo "Error: Failed to install mdadm"; return 1; }
-        elif command -v apt-get &> /dev/null; then
-            apt-get update || echo "Warning: apt-get update failed, continuing..."
-            DEBIAN_FRONTEND=noninteractive apt-get install -y mdadm || { echo "Error: Failed to install mdadm"; return 1; }
-        else
-            echo "Error: Neither yum nor apt-get found"
-            return 1
+    NVME_DRIVES=$(lsblk -dpno NAME | grep nvme | tail -n +2 | head -4 || echo "")
+    if [ -n "$NVME_DRIVES" ]; then
+        DRIVE_COUNT=$(echo "$NVME_DRIVES" | wc -l)
+        if [ "$DRIVE_COUNT" -gt 1 ]; then
+            mdadm --create --verbose /dev/md0 --level=0 --raid-devices="$DRIVE_COUNT" --force $NVME_DRIVES || true
+            mkfs.ext4 -F /dev/md0 && mkdir -p /mnt/nvme-raid && mount /dev/md0 /mnt/nvme-raid || true
+            chown "$LINUX_USER:$LINUX_USER" /mnt/nvme-raid || true
+            sudo -u "$LINUX_USER" ln -sf /mnt/nvme-raid "/home/$LINUX_USER/nvme-storage" || true
         fi
     fi
-    
-    # Wait for devices to be available
-    sleep 5
-    
-    # Find NVMe drives (excluding root device)
-    echo "Detecting NVMe drives..."
-    ROOT_DEVICE=""
-    if ROOT_SOURCE=$(findmnt -n -o SOURCE / 2>/dev/null); then
-        ROOT_DEVICE=$(lsblk -no PKNAME "$ROOT_SOURCE" 2>/dev/null || echo "")
-    fi
-    
-    # Get all NVMe drives
-    ALL_NVME=$(lsblk -dpno NAME 2>/dev/null | grep nvme || echo "")
-    
-    if [ -z "$ALL_NVME" ]; then
-        echo "No NVMe drives found at all"
-        return 0
-    fi
-    
-    # Filter out root device if found
-    NVME_DRIVES=""
-    if [ -n "$ROOT_DEVICE" ]; then
-        NVME_DRIVES=$(echo "$ALL_NVME" | grep -v "$ROOT_DEVICE" | head -4 || echo "")
-    else
-        # If we can't determine root device, skip the first NVMe drive as safety measure
-        NVME_DRIVES=$(echo "$ALL_NVME" | tail -n +2 | head -4 || echo "")
-    fi
-    
-    if [ -z "$NVME_DRIVES" ]; then
-        echo "No additional NVMe drives found for RAID setup (root device: $ROOT_DEVICE)"
-        return 0
-    fi
-    
-    DRIVE_COUNT=$(echo "$NVME_DRIVES" | wc -l)
-    echo "Found $DRIVE_COUNT NVMe drives for RAID0:"
-    echo "$NVME_DRIVES"
-    
-    # Ensure user home directory exists
-    if [ ! -d "/home/${linux_user}" ]; then
-        echo "Creating user home directory..."
-        mkdir -p "/home/${linux_user}"
-        chown "${linux_user}:${linux_user}" "/home/${linux_user}"
-    fi
-    
-    # Only proceed if we have multiple drives
-    if [ "$DRIVE_COUNT" -gt 1 ]; then
-        echo "Creating RAID0 array with $DRIVE_COUNT drives..."
-        
-        # Create RAID0 array with force flag to avoid prompts
-        if mdadm --create --verbose /dev/md0 --level=0 --raid-devices="$DRIVE_COUNT" --force $NVME_DRIVES; then
-            echo "RAID array created successfully"
-            
-            # Wait for array to be ready
-            sleep 10
-            
-            # Create filesystem
-            echo "Creating ext4 filesystem on RAID array..."
-            if mkfs.ext4 -F /dev/md0; then
-                echo "Filesystem created successfully"
-                
-                # Create mount point
-                mkdir -p /mnt/nvme-raid
-                
-                # Mount the array
-                if mount /dev/md0 /mnt/nvme-raid; then
-                    echo "RAID array mounted successfully"
-                    
-                    # Add to fstab for persistence
-                    echo "/dev/md0 /mnt/nvme-raid ext4 defaults,nofail 0 2" >> /etc/fstab
-                    
-                    # Set permissions
-                    chown "${linux_user}:${linux_user}" /mnt/nvme-raid
-                    chmod 755 /mnt/nvme-raid
-                    
-                    # Create a symlink in user's home directory
-                    sudo -u "${linux_user}" ln -sf /mnt/nvme-raid "/home/${linux_user}/nvme-storage" || echo "Warning: Failed to create symlink"
-                    
-                    echo "RAID0 setup complete. Available at /mnt/nvme-raid and ~/nvme-storage"
-                    
-                    # Save RAID configuration
-                    mkdir -p /etc/mdadm
-                    mdadm --detail --scan >> /etc/mdadm/mdadm.conf 2>/dev/null || mdadm --detail --scan >> /etc/mdadm.conf 2>/dev/null || echo "Warning: Could not save RAID config"
-                else
-                    echo "Error: Failed to mount RAID array"
-                fi
-            else
-                echo "Error: Failed to create filesystem on RAID array"
-            fi
-        else
-            echo "Error: Failed to create RAID array"
-        fi
-        
-    else
-        echo "Only one NVMe drive found, mounting directly without RAID"
-        SINGLE_DRIVE=$(echo "$NVME_DRIVES" | head -1)
-        
-        # Create filesystem on single drive
-        if mkfs.ext4 -F "$SINGLE_DRIVE"; then
-            echo "Filesystem created on single drive"
-            
-            # Create mount point and mount
-            mkdir -p /mnt/nvme-storage
-            if mount "$SINGLE_DRIVE" /mnt/nvme-storage; then
-                echo "Single drive mounted successfully"
-                
-                # Add to fstab
-                echo "$SINGLE_DRIVE /mnt/nvme-storage ext4 defaults,nofail 0 2" >> /etc/fstab
-                
-                # Set permissions
-                chown "${linux_user}:${linux_user}" /mnt/nvme-storage
-                chmod 755 /mnt/nvme-storage
-                
-                # Create symlink
-                sudo -u "${linux_user}" ln -sf /mnt/nvme-storage "/home/${linux_user}/nvme-storage" || echo "Warning: Failed to create symlink"
-                
-                echo "Single NVMe drive mounted at /mnt/nvme-storage and ~/nvme-storage"
-            else
-                echo "Error: Failed to mount single drive"
-            fi
-        else
-            echo "Error: Failed to create filesystem on single drive"
-        fi
-    fi
-}
-
-# Run RAID setup with error handling
-if ! setup_nvme_raid; then
-    echo "Warning: RAID setup failed, but continuing with instance setup..."
 fi
-
 %{ endif }
 
-
-echo "Installing pipx for user ${linux_user} before Coder agent starts..."
-
-# Ensure user home directory exists
-if [ ! -d "/home/${linux_user}" ]; then
-    mkdir -p "/home/${linux_user}"
-    chown "${linux_user}:${linux_user}" "/home/${linux_user}"
+# P5.4xlarge workaround
+if [[ "$INSTANCE_TYPE" == "p5.4xlarge" ]]; then
+    echo "export FI_HMEM_DISABLE_P2P=1" >> /etc/environment
+    export FI_HMEM_DISABLE_P2P=1
 fi
 
-# Install pipx for the user and ensure it's in PATH globally
-sudo -u '${linux_user}' bash -c '
-    # Install pipx
-    python3 -m pip install --user pipx
+# Setup user
+if ! id "$LINUX_USER" &>/dev/null; then
+    useradd -m -s /bin/bash "$LINUX_USER"
+    usermod -aG sudo "$LINUX_USER"
+    echo "$LINUX_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+fi
+chown "$LINUX_USER:$LINUX_USER" "/home/$LINUX_USER"
+
+# Install Python packages
+apt-get update || yum update -y || true
+apt-get install -y python3-pip python3-venv || yum install -y python3-pip python3-venv || true
+sudo -u "$LINUX_USER" bash -c 'python3 -m pip install --user pipx && echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.bashrc'
+
+# BYPASS problematic init script - start agent directly
+echo "=== Starting Coder Agent Directly $(date) ==="
+sudo -u "$LINUX_USER" bash -c '
+    cd /tmp
     export PATH="$HOME/.local/bin:$PATH"
-    pipx ensurepath
+    export CODER_AGENT_AUTH="aws-instance-identity"
+    export CODER_AGENT_URL="https://coder.shawnzh.people.aws.dev/"
     
-    # Add to bashrc to ensure it persists
-    echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.bashrc
+    # Set P5 workaround if needed
+    if [[ "$(curl -s http://169.254.169.254/latest/meta-data/instance-type)" == "p5.4xlarge" ]]; then
+        export FI_HMEM_DISABLE_P2P=1
+        echo "export FI_HMEM_DISABLE_P2P=1" >> ~/.bashrc
+    fi
     
-    # Verify installation
-    if command -v pipx &> /dev/null; then
-        echo "✅ pipx installed successfully for user ${linux_user}"
-        pipx --version
+    # Download and start agent
+    curl -fsSL https://coder.shawnzh.people.aws.dev/bin/coder-linux-amd64 -o coder
+    chmod +x coder
+    
+    # Start agent in background
+    nohup ./coder agent > coder-agent.log 2>&1 &
+    
+    # Wait a bit and check if agent started
+    sleep 5
+    if pgrep -f "coder.*agent" > /dev/null; then
+        echo "✅ Coder agent started successfully"
     else
-        echo "❌ pipx installation failed"
-        exit 1
+        echo "❌ Coder agent failed to start"
     fi
 '
 
-# Also create a system-wide link for pipx
-if [ -f "/home/${linux_user}/.local/bin/pipx" ]; then
-    ln -sf "/home/${linux_user}/.local/bin/pipx" "/usr/local/bin/pipx"
-    echo "✅ pipx linked globally"
-fi
+# Install development tools in background
+sudo -u "$LINUX_USER" bash -c '
+    export PATH="$HOME/.local/bin:$PATH"
+    
+    # Install code-server
+    curl -fsSL https://code-server.dev/install.sh | sh -s -- --method=standalone --prefix=/tmp/code-server
+    nohup /tmp/code-server/bin/code-server --bind-addr 127.0.0.1:13337 --auth none > /tmp/code-server.log 2>&1 &
+    
+    echo "✅ Development tools installed"
+' &
 
-echo "Running Coder agent initialization script..."
-
-# Run the Coder agent initialization script
-sudo -u '${linux_user}' sh -c '${init_script}' || {
-    echo "Error: Coder agent initialization failed"
-    exit 1
-}
-
-echo "User-data script completed successfully"
+echo "=== User Data Script Completed $(date) ==="

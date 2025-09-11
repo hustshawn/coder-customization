@@ -12,7 +12,7 @@ terraform {
   }
 }
 
-# Last updated 2023-03-14
+# Last updated 2025-09-11
 # aws ec2 describe-regions | jq -r '[.Regions[].RegionName] | sort'
 data "coder_parameter" "region" {
   name         = "region"
@@ -150,6 +150,10 @@ data "coder_parameter" "instance_type" {
     name  = "p5.4xlarge - 1xH100"
     value = "p5.4xlarge"
   }
+  option {
+    name  = "p5.48xlarge - 8xH100"
+    value = "p5.48xlarge"
+  }
 }
 
 data "coder_parameter" "disk_size" {
@@ -183,6 +187,8 @@ data "coder_parameter" "disk_size" {
     value = "1000"
   }
 }
+
+
 
 provider "aws" {
   region = data.coder_parameter.region.value
@@ -221,6 +227,20 @@ data "aws_ami" "gpu_optimized" {
   owners = ["amazon"]
 }
 
+# Fallback to regular Ubuntu AMI if Deep Learning AMI is not available
+data "aws_ami" "gpu_fallback" {
+  most_recent = true
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
+  }
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+  owners = ["099720109477"] # Canonical
+}
+
 locals {
   # Define GPU instance types
   gpu_instance_types = ["g6e.12xlarge", "p5.4xlarge"]
@@ -228,29 +248,69 @@ locals {
   # Check if selected instance type is a GPU instance
   is_gpu_instance = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
 
-  # Select appropriate AMI based on instance type
-  selected_ami_id = local.is_gpu_instance ? data.aws_ami.gpu_optimized.id : data.aws_ami.ubuntu.id
+  # Define GPU instances that need RAID0 setup (exclude p5.4xlarge)
+  gpu_instances_needing_raid = ["g6e.12xlarge"]
+
+  # Check if selected instance type needs RAID0 setup
+  needs_nvme_raid = contains(local.gpu_instances_needing_raid, data.coder_parameter.instance_type.value)
+
+  # Try to use GPU-optimized AMI, fallback to regular Ubuntu if not available
+  selected_ami_id = local.is_gpu_instance ? (
+    try(data.aws_ami.gpu_optimized.id, data.aws_ami.gpu_fallback.id)
+  ) : data.aws_ami.ubuntu.id
+
+  # Use consistent user for all instances to avoid confusion
+  # GPU AMIs typically use ec2-user, but we'll standardize on coder
+  use_gpu_ami = local.is_gpu_instance && can(data.aws_ami.gpu_optimized.id)
 }
 
 resource "coder_agent" "dev" {
-  count          = data.coder_workspace.me.start_count
-  arch           = "amd64"
-  auth           = "aws-instance-identity"
-  os             = "linux"
+  count               = data.coder_workspace.me.start_count
+  arch                = "amd64"
+  auth                = "aws-instance-identity"
+  os                  = "linux"
+  connection_timeout  = 900 # 15 minutes for P5 instances
+  troubleshooting_url = "https://coder.com/docs/coder-oss/latest/templates/troubleshooting"
+
   startup_script = <<-EOT
     set -e
     
-    # Ensure pipx is in PATH (should be installed by cloud-init)
+    # Log everything for debugging
+    exec > >(tee -a /tmp/coder-agent-startup.log) 2>&1
+    
+    echo "=== Coder Agent Startup $(date) ==="
+    echo "User: $(whoami)"
+    echo "Home: $HOME"
+    echo "PATH: $PATH"
+    
+    # Get instance type
+    INSTANCE_TYPE=$(curl -s http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo "unknown")
+    echo "Instance Type: $INSTANCE_TYPE"
+    
+    # Check if this is a P5.4xlarge and set environment variable
+    if [[ "$INSTANCE_TYPE" == "p5.4xlarge" ]]; then
+        echo "Setting P5.4xlarge workaround..."
+        export FI_HMEM_DISABLE_P2P=1
+        echo "export FI_HMEM_DISABLE_P2P=1" >> ~/.bashrc
+    fi
+    
+    # Ensure pipx is in PATH
     export PATH="$HOME/.local/bin:$PATH"
     
-    # Verify pipx is available
-    if command -v pipx &> /dev/null; then
-        echo "✅ pipx is ready"
-    else
-        echo "❌ pipx not found - this will cause module failures"
+    # Check if pipx is available, install if not
+    if ! command -v pipx &> /dev/null; then
+        echo "pipx not found, installing..."
+        python3 -m pip install --user pipx
+        export PATH="$HOME/.local/bin:$PATH"
     fi
-
-    # Add any commands that should be executed at workspace startup (e.g install requirements, start a program, etc) here
+    
+    if command -v pipx &> /dev/null; then
+        echo "✅ pipx available: $(pipx --version)"
+    else
+        echo "❌ pipx still not available after installation"
+    fi
+    
+    echo "=== Startup script completed ==="
   EOT
 
   metadata {
@@ -294,6 +354,7 @@ module "kiro" {
   source   = "registry.coder.com/coder/kiro/coder"
   version  = "1.0.0"
   agent_id = coder_agent.dev[0].id
+  folder   = "/home/ubuntu"
 }
 
 module "jupyter-notebook" {
@@ -304,8 +365,9 @@ module "jupyter-notebook" {
 }
 
 locals {
-  hostname   = lower(data.coder_workspace.me.name)
-  linux_user = local.is_gpu_instance ? "ec2-user" : "coder"
+  hostname = lower(data.coder_workspace.me.name)
+  # Use ubuntu user for GPU instances (Deep Learning AMI), coder for others
+  linux_user = local.is_gpu_instance ? "ubuntu" : "coder"
 }
 
 data "cloudinit_config" "user_data" {
@@ -331,14 +393,71 @@ data "cloudinit_config" "user_data" {
     content = templatefile("${path.module}/cloud-init/userdata.sh.tftpl", {
       linux_user      = local.linux_user
       is_gpu_instance = local.is_gpu_instance
+      needs_nvme_raid = local.needs_nvme_raid
       init_script     = try(coder_agent.dev[0].init_script, "")
     })
   }
 }
 
+# IAM role for SSM access
+resource "aws_iam_role" "coder_instance_role" {
+  name_prefix = "coder-instance-role-"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_managed_instance_core" {
+  role       = aws_iam_role.coder_instance_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "coder_instance_profile" {
+  name_prefix = "coder-instance-profile-"
+  role        = aws_iam_role.coder_instance_role.name
+}
+
+# Security group for Coder workspace
+resource "aws_security_group" "coder_workspace" {
+  name_prefix = "coder-workspace-"
+  description = "Security group for Coder workspace"
+
+  # Allow outbound internet access (required for Coder agent)
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow inbound SSH (optional, for debugging)
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "coder-workspace-${data.coder_workspace_owner.me.name}-${data.coder_workspace.me.name}"
+  }
+}
+
 resource "aws_instance" "dev" {
-  ami           = local.selected_ami_id
-  instance_type = data.coder_parameter.instance_type.value
+  ami                    = local.selected_ami_id
+  instance_type          = data.coder_parameter.instance_type.value
+  vpc_security_group_ids = [aws_security_group.coder_workspace.id]
+  iam_instance_profile   = aws_iam_instance_profile.coder_instance_profile.name
 
   root_block_device {
     volume_type = "gp3"
@@ -372,7 +491,7 @@ resource "coder_metadata" "workspace_info" {
     value = "${aws_instance.dev.root_block_device[0].volume_size} GiB"
   }
   dynamic "item" {
-    for_each = local.is_gpu_instance ? [1] : []
+    for_each = local.needs_nvme_raid ? [1] : []
     content {
       key   = "nvme storage"
       value = "RAID0 configured (available at ~/nvme-storage)"
