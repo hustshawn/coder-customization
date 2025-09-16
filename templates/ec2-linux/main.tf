@@ -322,6 +322,35 @@ module "kiro" {
   folder   = "/home/${local.linux_user}"
 }
 
+# JupyterLab module with pipx properly installed in userdata
+module "jupyterlab" {
+  count    = data.coder_workspace.me.start_count
+  source   = "registry.coder.com/coder/jupyterlab/coder"
+  version  = "~> 1.2"
+  agent_id = coder_agent.dev[0].id
+  config = jsonencode({
+    ServerApp = {
+      # Required for Coder Tasks iFrame embedding - do not remove
+      tornado_settings = {
+        headers = {
+          "Content-Security-Policy" = "frame-ancestors 'self' ${data.coder_workspace.me.access_url}"
+        }
+      }
+      # Your additional configuration here
+      root_dir = "/home/${local.linux_user}"
+    }
+  })
+}
+
+# Jupyter module causes connection issues - disabled
+# module "jupyter-notebook" {
+#   count    = data.coder_workspace.me.start_count
+#   source   = "registry.coder.com/coder/jupyter-notebook/coder"
+#   version  = "1.2.0"
+#   agent_id = coder_agent.dev[0].id
+# }
+
+
 locals {
   hostname = lower(data.coder_workspace.me.name)
   # Use ubuntu user for GPU instances (Deep Learning AMI), coder for others

@@ -13,10 +13,14 @@ if ! id "$LINUX_USER" &>/dev/null; then
     echo "$LINUX_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 fi
 
-# Install packages
+# Install packages including pipx for JupyterLab
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y curl wget python3-pip
+apt-get install -y curl wget python3-pip python3-venv
+
+# Install pipx for the user
+sudo -u $LINUX_USER python3 -m pip install --user pipx
+sudo -u $LINUX_USER /home/$LINUX_USER/.local/bin/pipx ensurepath
 
 echo "SETUP_COMPLETE" > /tmp/coder-setup-status
 
@@ -24,6 +28,7 @@ echo "SETUP_COMPLETE" > /tmp/coder-setup-status
 echo "Starting Coder agent as $LINUX_USER..."
 sudo -u $LINUX_USER bash -c '
 export HOME="/home/${linux_user}"
+export PATH="$HOME/.local/bin:$PATH"
 cd "$HOME"
 ${init_script}
 ' > /var/log/coder-agent.log 2>&1 &
