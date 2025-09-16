@@ -165,15 +165,11 @@ data "coder_parameter" "disk_size" {
   name         = "disk_size"
   display_name = "Disk Size"
   description  = "How much disk space should your workspace have?"
-  default      = "20"
+  default      = "100"
   mutable      = false
   option {
-    name  = "20 GiB"
-    value = "20"
-  }
-  option {
-    name  = "50 GiB"
-    value = "50"
+    name  = "75 GiB (Minimum for GPU AMIs)"
+    value = "75"
   }
   option {
     name  = "100 GiB"
@@ -190,6 +186,10 @@ data "coder_parameter" "disk_size" {
   option {
     name  = "1000 GiB (1 TiB)"
     value = "1000"
+  }
+  option {
+    name  = "2000 GiB (2 TiB)"
+    value = "2000"
   }
 }
 
@@ -219,7 +219,7 @@ data "aws_ami" "gpu_optimized" {
   most_recent = true
   filter {
     name   = "name"
-    values = ["Deep Learning*Ubuntu*"]
+    values = ["Deep Learning Base OSS Nvidia Driver GPU AMI*Ubuntu*"]
   }
   filter {
     name   = "virtualization-type"
@@ -248,13 +248,13 @@ data "aws_ami" "gpu_fallback" {
 
 locals {
   # Define GPU instance types
-  gpu_instance_types = ["g6e.12xlarge", "p5.4xlarge"]
+  gpu_instance_types = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge"]
 
   # Check if selected instance type is a GPU instance
   is_gpu_instance = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
 
   # Define GPU instances that need RAID0 setup (exclude p5.4xlarge)
-  gpu_instances_needing_raid = ["g6e.12xlarge"]
+  gpu_instances_needing_raid = ["g6e.12xlarge", "p5.48xlarge"]
 
   # Check if selected instance type needs RAID0 setup
   needs_nvme_raid = contains(local.gpu_instances_needing_raid, data.coder_parameter.instance_type.value)
@@ -264,8 +264,11 @@ locals {
     try(data.aws_ami.gpu_optimized.id, data.aws_ami.gpu_fallback.id)
   ) : data.aws_ami.ubuntu.id
 
+  # Ensure minimum disk size for GPU instances (Deep Learning AMI requires 75GB minimum)
+  disk_size = local.is_gpu_instance ? max(75, tonumber(data.coder_parameter.disk_size.value)) : tonumber(data.coder_parameter.disk_size.value)
+
   # Use consistent user for all instances to avoid confusion
-  # GPU AMIs typically use ec2-user, but we'll standardize on coder
+  # GPU AMIs typically use ec2-user, but we'll standardize on ubuntu for GPU instances
   use_gpu_ami = local.is_gpu_instance && can(data.aws_ami.gpu_optimized.id)
 }
 
@@ -274,49 +277,10 @@ resource "coder_agent" "dev" {
   arch                = "amd64"
   auth                = "aws-instance-identity"
   os                  = "linux"
-  connection_timeout  = 900 # 15 minutes for P5 instances
+  connection_timeout  = 120
   troubleshooting_url = "https://coder.com/docs/coder-oss/latest/templates/troubleshooting"
 
-  startup_script = <<-EOT
-    set -e
-    
-    # Log everything for debugging
-    exec > >(tee -a /tmp/coder-agent-startup.log) 2>&1
-    
-    echo "=== Coder Agent Startup $(date) ==="
-    echo "User: $(whoami)"
-    echo "Home: $HOME"
-    echo "PATH: $PATH"
-    
-    # Get instance type
-    INSTANCE_TYPE=$(curl -s http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo "unknown")
-    echo "Instance Type: $INSTANCE_TYPE"
-    
-    # Check if this is a P5.4xlarge and set environment variable
-    if [[ "$INSTANCE_TYPE" == "p5.4xlarge" ]]; then
-        echo "Setting P5.4xlarge workaround..."
-        export FI_HMEM_DISABLE_P2P=1
-        echo "export FI_HMEM_DISABLE_P2P=1" >> ~/.bashrc
-    fi
-    
-    # Ensure pipx is in PATH
-    export PATH="$HOME/.local/bin:$PATH"
-    
-    # Check if pipx is available, install if not
-    if ! command -v pipx &> /dev/null; then
-        echo "pipx not found, installing..."
-        python3 -m pip install --user pipx
-        export PATH="$HOME/.local/bin:$PATH"
-    fi
-    
-    if command -v pipx &> /dev/null; then
-        echo "✅ pipx available: $(pipx --version)"
-    else
-        echo "❌ pipx still not available after installation"
-    fi
-    
-    echo "=== Startup script completed ==="
-  EOT
+  # startup_script = ""
 
   metadata {
     key          = "cpu"
@@ -341,18 +305,14 @@ resource "coder_agent" "dev" {
   }
 }
 
-# See https://registry.coder.com/modules/coder/code-server
+# Working modules ✅
 module "code-server" {
-  count  = data.coder_workspace.me.start_count
-  source = "registry.coder.com/modules/code-server/coder"
-
-  # This ensures that the latest non-breaking version of the module gets downloaded, you can also pin the module version to prevent breaking changes in production.
-  version = "~> 1.0"
-
+  count    = data.coder_workspace.me.start_count
+  source   = "registry.coder.com/modules/code-server/coder"
+  version  = "~> 1.0"
   agent_id = coder_agent.dev[0].id
   order    = 1
 }
-
 
 module "kiro" {
   count    = data.coder_workspace.me.start_count
@@ -360,13 +320,6 @@ module "kiro" {
   version  = "1.1.0"
   agent_id = coder_agent.dev[0].id
   folder   = "/home/${local.linux_user}"
-}
-
-module "jupyter-notebook" {
-  count    = data.coder_workspace.me.start_count
-  source   = "registry.coder.com/coder/jupyter-notebook/coder"
-  version  = "1.2.0"
-  agent_id = coder_agent.dev[0].id
 }
 
 locals {
@@ -396,10 +349,8 @@ data "cloudinit_config" "user_data" {
     content_type = "text/x-shellscript"
 
     content = templatefile("${path.module}/cloud-init/userdata.sh.tftpl", {
-      linux_user      = local.linux_user
-      is_gpu_instance = local.is_gpu_instance
-      needs_nvme_raid = local.needs_nvme_raid
-      init_script     = try(coder_agent.dev[0].init_script, "")
+      linux_user  = local.linux_user
+      init_script = try(coder_agent.dev[0].init_script, "")
     })
   }
 }
@@ -464,9 +415,16 @@ resource "aws_instance" "dev" {
   vpc_security_group_ids = [aws_security_group.coder_workspace.id]
   iam_instance_profile   = aws_iam_instance_profile.coder_instance_profile.name
 
+  # Fix IMDSv2 configuration for agent authentication
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "optional" # Allow both IMDSv1 and IMDSv2
+    http_put_response_hop_limit = 2
+  }
+
   root_block_device {
     volume_type = "gp3"
-    volume_size = data.coder_parameter.disk_size.value
+    volume_size = local.is_gpu_instance ? max(75, tonumber(data.coder_parameter.disk_size.value)) : tonumber(data.coder_parameter.disk_size.value)
     encrypted   = true
   }
 

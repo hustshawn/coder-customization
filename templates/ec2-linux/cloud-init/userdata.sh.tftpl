@@ -4,92 +4,28 @@ exec > >(tee /var/log/user-data.log) 2>&1
 
 echo "=== User Data Script Started $(date) ==="
 
-# Set variables safely
 LINUX_USER="${linux_user}"
-IS_GPU_INSTANCE="${is_gpu_instance}"
-NEEDS_NVME_RAID="${needs_nvme_raid}"
-INSTANCE_TYPE=$(curl -s http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo "unknown")
 
-echo "Linux user: $LINUX_USER"
-echo "Instance Type: $INSTANCE_TYPE"
-
-%{ if needs_nvme_raid }
-# Quick NVME setup for GPU instances
-if [[ "$NEEDS_NVME_RAID" == "true" ]]; then
-    echo "Setting up NVMe storage..."
-    apt-get update && apt-get install -y mdadm || yum install -y mdadm || true
-    
-    NVME_DRIVES=$(lsblk -dpno NAME | grep nvme | tail -n +2 | head -4 || echo "")
-    if [ -n "$NVME_DRIVES" ]; then
-        DRIVE_COUNT=$(echo "$NVME_DRIVES" | wc -l)
-        if [ "$DRIVE_COUNT" -gt 1 ]; then
-            mdadm --create --verbose /dev/md0 --level=0 --raid-devices="$DRIVE_COUNT" --force $NVME_DRIVES || true
-            mkfs.ext4 -F /dev/md0 && mkdir -p /mnt/nvme-raid && mount /dev/md0 /mnt/nvme-raid || true
-            chown "$LINUX_USER:$LINUX_USER" /mnt/nvme-raid || true
-            sudo -u "$LINUX_USER" ln -sf /mnt/nvme-raid "/home/$LINUX_USER/nvme-storage" || true
-        fi
-    fi
-fi
-%{ endif }
-
-# P5.4xlarge workaround
-if [[ "$INSTANCE_TYPE" == "p5.4xlarge" ]]; then
-    echo "export FI_HMEM_DISABLE_P2P=1" >> /etc/environment
-    export FI_HMEM_DISABLE_P2P=1
-fi
-
-# Setup user
+# Basic setup
 if ! id "$LINUX_USER" &>/dev/null; then
     useradd -m -s /bin/bash "$LINUX_USER"
     usermod -aG sudo "$LINUX_USER"
     echo "$LINUX_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 fi
-chown "$LINUX_USER:$LINUX_USER" "/home/$LINUX_USER"
 
-# Install Python packages
-apt-get update || yum update -y || true
-apt-get install -y python3-pip python3-venv || yum install -y python3-pip python3-venv || true
-sudo -u "$LINUX_USER" bash -c 'python3 -m pip install --user pipx && echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> ~/.bashrc'
+# Install packages
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y curl wget python3-pip
 
-# BYPASS problematic init script - start agent directly
-echo "=== Starting Coder Agent Directly $(date) ==="
-sudo -u "$LINUX_USER" bash -c '
-    cd /tmp
-    export PATH="$HOME/.local/bin:$PATH"
-    export CODER_AGENT_AUTH="aws-instance-identity"
-    export CODER_AGENT_URL="https://coder.shawnzh.people.aws.dev/"
-    
-    # Set P5 workaround if needed
-    if [[ "$(curl -s http://169.254.169.254/latest/meta-data/instance-type)" == "p5.4xlarge" ]]; then
-        export FI_HMEM_DISABLE_P2P=1
-        echo "export FI_HMEM_DISABLE_P2P=1" >> ~/.bashrc
-    fi
-    
-    # Download and start agent
-    curl -fsSL https://coder.shawnzh.people.aws.dev/bin/coder-linux-amd64 -o coder
-    chmod +x coder
-    
-    # Start agent in background
-    nohup ./coder agent > coder-agent.log 2>&1 &
-    
-    # Wait a bit and check if agent started
-    sleep 5
-    if pgrep -f "coder.*agent" > /dev/null; then
-        echo "✅ Coder agent started successfully"
-    else
-        echo "❌ Coder agent failed to start"
-    fi
-'
+echo "SETUP_COMPLETE" > /tmp/coder-setup-status
 
-# Install development tools in background
-sudo -u "$LINUX_USER" bash -c '
-    export PATH="$HOME/.local/bin:$PATH"
-    
-    # Install code-server
-    curl -fsSL https://code-server.dev/install.sh | sh -s -- --method=standalone --prefix=/tmp/code-server
-    nohup /tmp/code-server/bin/code-server --bind-addr 127.0.0.1:13337 --auth none > /tmp/code-server.log 2>&1 &
-    
-    echo "✅ Development tools installed"
-' &
+# Run the Coder agent init script directly as the user
+echo "Starting Coder agent as $LINUX_USER..."
+sudo -u $LINUX_USER bash -c '
+export HOME="/home/${linux_user}"
+cd "$HOME"
+${init_script}
+' > /var/log/coder-agent.log 2>&1 &
 
-echo "=== User Data Script Completed $(date) ==="
+echo "=== User Data Complete $(date) ==="

@@ -1,20 +1,44 @@
 #cloud-config
 cloud_final_modules:
   - [scripts-user, always]
+
+# Set timeout for cloud-init
+timeout: 300
 hostname: ${hostname}
+
+# Disable automatic updates to prevent conflicts
+package_update: false
+package_upgrade: false
 
 users:
   - name: ${linux_user}
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     lock_passwd: false
+    groups: [sudo, docker]
 
 packages:
   - python3-pip
-  - python3-venv
   - curl
+  - wget
+  - unzip
 
+# Write status files
+write_files:
+  - path: /tmp/cloud-init-debug.log
+    content: |
+      Cloud-init started at $(date)
+      User: ${linux_user}
+      Hostname: ${hostname}
+    permissions: '0644'
+
+# Ensure proper permissions
 runcmd:
-  - apt-get update || yum update -y || true
   - mkdir -p /home/${linux_user}
   - chown ${linux_user}:${linux_user} /home/${linux_user}
+  - chmod 755 /home/${linux_user}
+  - echo "CLOUD_CONFIG_COMPLETED" > /tmp/cloud-config-status
+
+# Enable detailed logging
+output:
+  all: ">> /var/log/cloud-init-output.log"
