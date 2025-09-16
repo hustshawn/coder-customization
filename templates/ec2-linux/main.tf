@@ -219,7 +219,7 @@ data "aws_ami" "gpu_optimized" {
   most_recent = true
   filter {
     name   = "name"
-    values = ["Deep Learning Base GPU AMI (Ubuntu 20.04)*"]
+    values = ["Deep Learning*Ubuntu*"]
   }
   filter {
     name   = "virtualization-type"
