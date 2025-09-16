@@ -30,6 +30,11 @@ data "coder_parameter" "region" {
     value = "ap-southeast-3"
     icon  = "/emojis/1f1ee-1f1e9.png"
   }
+  option {
+    name  = "Asia Pacific (Hong Kong)"
+    value = "ap-east-1"
+    icon  = "/emojis/1f1ed-1f1f0.png"
+  }
   # option {
   #   name  = "Asia Pacific (Seoul)"
   #   value = "ap-northeast-2"
@@ -119,27 +124,27 @@ data "coder_parameter" "instance_type" {
   default      = "t3.micro"
   mutable      = false
   option {
-    name  = "2 vCPU, 1 GiB RAM"
+    name  = "t3.micro(2 vCPU, 1 GiB RAM)"
     value = "t3.micro"
   }
   option {
-    name  = "2 vCPU, 2 GiB RAM"
+    name  = "t3.small(2 vCPU, 2 GiB RAM)"
     value = "t3.small"
   }
   option {
-    name  = "2 vCPU, 4 GiB RAM"
+    name  = "t3.medium(2 vCPU, 4 GiB RAM)"
     value = "t3.medium"
   }
   option {
-    name  = "2 vCPU, 8 GiB RAM"
+    name  = "t3.large(2 vCPU, 8 GiB RAM)"
     value = "t3.large"
   }
   option {
-    name  = "4 vCPU, 16 GiB RAM"
+    name  = "t3.xlarge(4 vCPU, 16 GiB RAM)"
     value = "t3.xlarge"
   }
   option {
-    name  = "8 vCPU, 32 GiB RAM"
+    name  = "t3.2xlarge (8 vCPU, 32 GiB RAM)"
     value = "t3.2xlarge"
   }
   option {
