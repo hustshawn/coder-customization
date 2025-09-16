@@ -357,9 +357,9 @@ module "code-server" {
 module "kiro" {
   count    = data.coder_workspace.me.start_count
   source   = "registry.coder.com/coder/kiro/coder"
-  version  = "1.0.0"
+  version  = "1.1.0"
   agent_id = coder_agent.dev[0].id
-  folder   = "/home/ubuntu"
+  folder   = "/home/${local.linux_user}"
 }
 
 module "jupyter-notebook" {
