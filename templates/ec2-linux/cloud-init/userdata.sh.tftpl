@@ -2,42 +2,34 @@
 set -e
 exec > >(tee /var/log/user-data.log) 2>&1
 
-echo "=== User Data Script Started $(date) ==="
-
 LINUX_USER="${linux_user}"
 
-# Basic setup
+# Create user if needed
 if ! id "$LINUX_USER" &>/dev/null; then
     useradd -m -s /bin/bash "$LINUX_USER"
     usermod -aG sudo "$LINUX_USER"
     echo "$LINUX_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 fi
 
-# Install packages including pipx for JupyterLab
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y curl wget python3-pip python3-venv
+# Install python venv package for current python version
+PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}-venv')")
+apt-get update -y
+apt-get install -y $PYTHON_VERSION
 
-# Upgrade AWS CLI from v1 to v2
-echo "Upgrading AWS CLI to v2..."
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-./aws/install --update
-rm -rf aws awscliv2.zip
+# Install/upgrade AWS CLI to v2
+if ! command -v aws &>/dev/null || aws --version 2>&1 | grep -q "aws-cli/1\."; then
+    curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip -q awscliv2.zip && ./aws/install --update && rm -rf aws awscliv2.zip
+fi
 
-# Install pipx for the user
+# Install pipx for JupyterLab
 sudo -u $LINUX_USER python3 -m pip install --user pipx
 sudo -u $LINUX_USER /home/$LINUX_USER/.local/bin/pipx ensurepath
 
-echo "SETUP_COMPLETE" > /tmp/coder-setup-status
-
-# Run the Coder agent init script directly as the user
-echo "Starting Coder agent as $LINUX_USER..."
+# Start Coder agent
 sudo -u $LINUX_USER bash -c '
 export HOME="/home/${linux_user}"
 export PATH="$HOME/.local/bin:$PATH"
 cd "$HOME"
 ${init_script}
 ' > /var/log/coder-agent.log 2>&1 &
-
-echo "=== User Data Complete $(date) ==="
