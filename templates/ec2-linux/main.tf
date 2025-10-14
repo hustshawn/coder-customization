@@ -148,6 +148,14 @@ data "coder_parameter" "instance_type" {
     value = "t3.2xlarge"
   }
   option {
+    name  = "c7i.2xlarge (8 vCPU, 16 GiB RAM)"
+    value = "c7i.2xlarge"
+  }
+  option {
+    name  = "c7g.2xlarge (8 vCPU, 16 GiB RAM)"
+    value = "c7g.2xlarge"
+  }
+  option {
     name  = "g6e.12xlarge - 4xL40S"
     value = "g6e.12xlarge"
   }
