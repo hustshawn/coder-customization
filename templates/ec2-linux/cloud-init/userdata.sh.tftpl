@@ -11,10 +11,10 @@ if ! id "$LINUX_USER" &>/dev/null; then
     echo "$LINUX_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 fi
 
-# Install python venv package for current python version
+# Install required packages including unzip and pip
 PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}-venv')")
 apt-get update -y
-apt-get install -y $PYTHON_VERSION
+apt-get install -y $PYTHON_VERSION unzip python3-pip curl wget
 
 # Install/upgrade AWS CLI to v2
 if ! command -v aws &>/dev/null || aws --version 2>&1 | grep -q "aws-cli/1\."; then
