@@ -4,21 +4,15 @@ exec > >(tee /var/log/user-data.log) 2>&1
 
 LINUX_USER="${linux_user}"
 
-# Create user if needed
-if ! id "$LINUX_USER" &>/dev/null; then
-    useradd -m -s /bin/bash "$LINUX_USER"
-    usermod -aG sudo "$LINUX_USER"
-    echo "$LINUX_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-fi
-
-# Install required packages including unzip and pip
-PYTHON_VERSION=$(python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}-venv')")
-apt-get update -y
-apt-get install -y $PYTHON_VERSION unzip python3-pip curl wget
-
-# Install/upgrade AWS CLI to v2
+# Install AWS CLI to v2 (with architecture detection)
 if ! command -v aws &>/dev/null || aws --version 2>&1 | grep -q "aws-cli/1\."; then
-    curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    ARCH=$(uname -m)
+    if [ "$ARCH" = "aarch64" ]; then
+        AWS_CLI_ARCH="aarch64"
+    else
+        AWS_CLI_ARCH="x86_64"
+    fi
+    curl -s "https://awscli.amazonaws.com/awscli-exe-linux-$AWS_CLI_ARCH.zip" -o "awscliv2.zip"
     unzip -q awscliv2.zip && ./aws/install --update && rm -rf aws awscliv2.zip
 fi
 

@@ -2,12 +2,10 @@
 cloud_final_modules:
   - [scripts-user, always]
 
-# Set timeout for cloud-init
-timeout: 300
 hostname: ${hostname}
 
 # Disable automatic updates to prevent conflicts
-package_update: true
+package_update: false
 package_upgrade: false
 
 users:
@@ -16,13 +14,6 @@ users:
     shell: /bin/bash
     lock_passwd: false
     groups: [sudo, docker]
-
-packages:
-  - curl
-  - wget
-  - unzip
-  - python3-pip
-  - python3-venv
 
 # Write status files
 write_files:
@@ -33,12 +24,13 @@ write_files:
       Hostname: ${hostname}
     permissions: '0644'
 
-# Ensure proper permissions
+# Ensure proper permissions and install packages
 runcmd:
+  - apt-get update -y
+  - apt-get install -y curl wget unzip python3-pip python3-venv gawk
   - mkdir -p /home/${linux_user}
   - chown ${linux_user}:${linux_user} /home/${linux_user}
   - chmod 755 /home/${linux_user}
-  - echo "CLOUD_CONFIG_COMPLETED" > /tmp/cloud-config-status
 
 # Enable detailed logging
 output:

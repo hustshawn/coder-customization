@@ -3,4 +3,8 @@
 planfile
 *tfvars
 
+.bak*
+
+context
+
 .DS_Store
