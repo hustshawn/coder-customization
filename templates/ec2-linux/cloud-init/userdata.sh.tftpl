@@ -16,9 +16,13 @@ if ! command -v aws &>/dev/null || aws --version 2>&1 | grep -q "aws-cli/1\."; t
     unzip -q awscliv2.zip && ./aws/install --update && rm -rf aws awscliv2.zip
 fi
 
-# Install pipx for JupyterLab
-sudo -u $LINUX_USER python3 -m pip install --user pipx
-sudo -u $LINUX_USER /home/$LINUX_USER/.local/bin/pipx ensurepath
+# Install pipx for JupyterLab using UV
+sudo -u $LINUX_USER bash -c '
+export PATH="$HOME/.local/bin:$PATH"
+uv tool install pipx
+# UV tools are installed to ~/.local/bin by default
+pipx ensurepath
+'
 
 # Start Coder agent
 sudo -u $LINUX_USER bash -c '

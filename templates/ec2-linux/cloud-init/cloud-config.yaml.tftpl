@@ -27,10 +27,13 @@ write_files:
 # Ensure proper permissions and install packages
 runcmd:
   - apt-get update -y
-  - apt-get install -y curl wget unzip python3-pip python3-venv gawk
+  - apt-get install -y curl wget unzip gawk
   - mkdir -p /home/${linux_user}
   - chown ${linux_user}:${linux_user} /home/${linux_user}
   - chmod 755 /home/${linux_user}
+  - sudo -u ${linux_user} bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+  - sudo -u ${linux_user} bash -c 'export PATH="$HOME/.local/bin:$PATH" && uv python install 3.12 && uv python pin --global 3.12'
+  - sudo -u ${linux_user} bash -c 'ln -sf $HOME/.local/bin/python3.12 $HOME/.local/bin/python && ln -sf $HOME/.local/bin/python3.12 $HOME/.local/bin/python3'
 
 # Enable detailed logging
 output:
