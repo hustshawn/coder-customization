@@ -4,6 +4,12 @@ exec > >(tee /var/log/user-data.log) 2>&1
 
 LINUX_USER="${linux_user}"
 
+# Ensure required packages are installed before anything else
+if ! command -v unzip &>/dev/null; then
+    apt-get update -qq
+    apt-get install -y unzip curl wget gawk
+fi
+
 # Install AWS CLI to v2 (with architecture detection)
 if ! command -v aws &>/dev/null || aws --version 2>&1 | grep -q "aws-cli/1\."; then
     ARCH=$(uname -m)

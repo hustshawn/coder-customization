@@ -5,8 +5,15 @@ cloud_final_modules:
 hostname: ${hostname}
 
 # Disable automatic updates to prevent conflicts
-package_update: false
+package_update: true
 package_upgrade: false
+
+# Install required packages early
+packages:
+  - curl
+  - wget
+  - unzip
+  - gawk
 
 users:
   - name: ${linux_user}
@@ -24,10 +31,8 @@ write_files:
       Hostname: ${hostname}
     permissions: '0644'
 
-# Ensure proper permissions and install packages
+# Ensure proper permissions
 runcmd:
-  - apt-get update -y
-  - apt-get install -y curl wget unzip gawk
   - mkdir -p /home/${linux_user}
   - chown ${linux_user}:${linux_user} /home/${linux_user}
   - chmod 755 /home/${linux_user}

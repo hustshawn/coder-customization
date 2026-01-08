@@ -268,7 +268,7 @@ data "aws_ami" "gpu_fallback" {
   most_recent = true
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-${local.architecture}-server-*"]
   }
   filter {
     name   = "virtualization-type"
@@ -293,7 +293,7 @@ locals {
 
 resource "coder_agent" "dev" {
   count               = data.coder_workspace.me.start_count
-  arch                = "amd64"
+  arch                = local.architecture
   auth                = "aws-instance-identity"
   os                  = "linux"
   connection_timeout  = 120
