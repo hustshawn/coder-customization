@@ -210,11 +210,34 @@ provider "aws" {
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
+locals {
+  # Define GPU instance types
+  gpu_instance_types = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge"]
+
+  # Define ARM64 instance types
+  arm64_instance_types = ["c7g.2xlarge"]
+
+  # Check if selected instance type is a GPU instance
+  is_gpu_instance = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
+
+  # Check if selected instance type is ARM64
+  is_arm64_instance = contains(local.arm64_instance_types, data.coder_parameter.instance_type.value)
+
+  # Define GPU instances that need RAID0 setup (exclude p5.4xlarge)
+  gpu_instances_needing_raid = ["g6e.12xlarge", "p5.48xlarge"]
+
+  # Check if selected instance type needs RAID0 setup
+  needs_nvme_raid = contains(local.gpu_instances_needing_raid, data.coder_parameter.instance_type.value)
+
+  # Determine architecture
+  architecture = local.is_arm64_instance ? "arm64" : "amd64"
+}
+
 data "aws_ami" "ubuntu" {
   most_recent = true
   filter {
     name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*"]
+    values = ["ubuntu/images/hvm-ssd/ubuntu-focal-20.04-${local.architecture}-server-*"]
   }
   filter {
     name   = "virtualization-type"
@@ -255,18 +278,6 @@ data "aws_ami" "gpu_fallback" {
 }
 
 locals {
-  # Define GPU instance types
-  gpu_instance_types = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge"]
-
-  # Check if selected instance type is a GPU instance
-  is_gpu_instance = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
-
-  # Define GPU instances that need RAID0 setup (exclude p5.4xlarge)
-  gpu_instances_needing_raid = ["g6e.12xlarge", "p5.48xlarge"]
-
-  # Check if selected instance type needs RAID0 setup
-  needs_nvme_raid = contains(local.gpu_instances_needing_raid, data.coder_parameter.instance_type.value)
-
   # Try to use GPU-optimized AMI, fallback to regular Ubuntu if not available
   selected_ami_id = local.is_gpu_instance ? (
     try(data.aws_ami.gpu_optimized.id, data.aws_ami.gpu_fallback.id)
@@ -322,11 +333,11 @@ module "code-server" {
 
 # Kiro CLI installation
 resource "coder_script" "kiro_cli" {
-  count        = data.coder_workspace.me.start_count
-  agent_id     = coder_agent.dev[0].id
-  display_name = "Kiro CLI"
-  icon         = "/icon/aws.svg"
-  script = <<-EOT
+  count              = data.coder_workspace.me.start_count
+  agent_id           = coder_agent.dev[0].id
+  display_name       = "Kiro CLI"
+  icon               = "/icon/aws.svg"
+  script             = <<-EOT
     #!/bin/bash
     set -e
 
@@ -338,10 +349,10 @@ resource "coder_script" "kiro_cli" {
       echo "Kiro CLI already installed"
     fi
   EOT
-  run_on_start = true
-  run_on_stop  = false
+  run_on_start       = true
+  run_on_stop        = false
   start_blocks_login = false
-  timeout      = 300
+  timeout            = 300
 }
 
 module "kiro" {
@@ -371,15 +382,6 @@ module "jupyterlab" {
     }
   })
 }
-
-# Jupyter module causes connection issues - disabled
-# module "jupyter-notebook" {
-#   count    = data.coder_workspace.me.start_count
-#   source   = "registry.coder.com/coder/jupyter-notebook/coder"
-#   version  = "1.2.0"
-#   agent_id = coder_agent.dev[0].id
-# }
-
 
 locals {
   hostname = lower(data.coder_workspace.me.name)
