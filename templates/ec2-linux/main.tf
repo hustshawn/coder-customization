@@ -320,45 +320,22 @@ module "code-server" {
   order    = 1
 }
 
-# Amazon Q CLI installation
-resource "coder_script" "amazon_q" {
+# Kiro CLI installation
+resource "coder_script" "kiro_cli" {
   count        = data.coder_workspace.me.start_count
   agent_id     = coder_agent.dev[0].id
-  display_name = "Amazon Q CLI"
+  display_name = "Kiro CLI"
   icon         = "/icon/aws.svg"
   script = <<-EOT
     #!/bin/bash
     set -e
 
-    if ! command -v q &>/dev/null; then
-      echo "Installing Amazon Q CLI..."
-      cd $HOME
-
-      GLIBC_VERSION=$(ldd --version | head -n1 | grep -oE '[0-9]+\.[0-9]+' | head -n1)
-      ARCH=$(uname -m)
-
-      if [ "$ARCH" = "x86_64" ]; then
-        if awk "BEGIN {exit !($GLIBC_VERSION >= 2.34)}"; then
-          URL="https://desktop-release.q.us-east-1.amazonaws.com/latest/q-x86_64-linux.zip"
-        else
-          URL="https://desktop-release.q.us-east-1.amazonaws.com/latest/q-x86_64-linux-musl.zip"
-        fi
-      elif [ "$ARCH" = "aarch64" ]; then
-        if awk "BEGIN {exit !($GLIBC_VERSION >= 2.34)}"; then
-          URL="https://desktop-release.q.us-east-1.amazonaws.com/latest/q-aarch64-linux.zip"
-        else
-          URL="https://desktop-release.q.us-east-1.amazonaws.com/latest/q-aarch64-linux-musl.zip"
-        fi
-      fi
-
-      curl --proto '=https' --tlsv1.2 -sSf "$URL" -o "q.zip"
-      unzip -q q.zip
-      ./q/install.sh --no-confirm
-      rm -rf q.zip q/
-
-      echo "✅ Amazon Q CLI installed successfully!"
+    if ! command -v kiro-cli &>/dev/null; then
+      echo "Installing Kiro CLI..."
+      curl -fsSL https://cli.kiro.dev/install | bash
+      echo "✅ Kiro CLI installed successfully!"
     else
-      echo "Amazon Q CLI already installed"
+      echo "Kiro CLI already installed"
     fi
   EOT
   run_on_start = true
@@ -500,7 +477,7 @@ resource "aws_instance" "dev" {
   # Fix IMDSv2 configuration for agent authentication
   metadata_options {
     http_endpoint               = "enabled"
-    http_tokens                 = "optional" # Allow both IMDSv1 and IMDSv2
+    http_tokens                 = "required" # Enforce IMDSv2 only
     http_put_response_hop_limit = 2
   }
 
