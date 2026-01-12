@@ -152,8 +152,20 @@ data "coder_parameter" "instance_type" {
     value = "c7i.2xlarge"
   }
   option {
+    name  = "c8i.2xlarge (8 vCPU, 16 GiB RAM)"
+    value = "c8i.2xlarge"
+  }
+  option {
     name  = "c7g.2xlarge (8 vCPU, 16 GiB RAM)"
     value = "c7g.2xlarge"
+  }
+  option {
+    name  = "c8g.2xlarge (8 vCPU, 16 GiB RAM)"
+    value = "c8g.2xlarge"
+  }
+  option {
+    name  = "x8aedz.3xlarge (12 vCPU, 384GM)"
+    value = "x8aedz.3xlarge"
   }
   option {
     name  = "g6e.12xlarge - 4xL40S"
@@ -167,6 +179,7 @@ data "coder_parameter" "instance_type" {
     name  = "p5.48xlarge - 8xH100"
     value = "p5.48xlarge"
   }
+
 }
 
 data "coder_parameter" "disk_size" {
