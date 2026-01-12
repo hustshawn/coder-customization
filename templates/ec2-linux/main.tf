@@ -228,7 +228,7 @@ locals {
   gpu_instance_types = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge"]
 
   # Define ARM64 instance types
-  arm64_instance_types = ["c7g.2xlarge"]
+  arm64_instance_types = ["c7g.2xlarge", "c8g.2xlarge"]
 
   # Check if selected instance type is a GPU instance
   is_gpu_instance = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)

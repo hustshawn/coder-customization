@@ -22,12 +22,30 @@ if ! command -v aws &>/dev/null || aws --version 2>&1 | grep -q "aws-cli/1\."; t
     unzip -q awscliv2.zip && ./aws/install --update && rm -rf aws awscliv2.zip
 fi
 
-# Install pipx for JupyterLab using UV
+# Install UV if not present
+sudo -u $LINUX_USER bash -c '
+if ! command -v uv &>/dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+'
+
+# Wait for UV to be available
+for i in {1..30}; do
+    if sudo -u $LINUX_USER bash -c 'export PATH="$HOME/.local/bin:$PATH" && command -v uv &>/dev/null'; then
+        break
+    fi
+    sleep 1
+done
+
+# Install Python and pipx using UV
 sudo -u $LINUX_USER bash -c '
 export PATH="$HOME/.local/bin:$PATH"
-uv tool install pipx
-# UV tools are installed to ~/.local/bin by default
-pipx ensurepath
+uv python install 3.12 2>/dev/null || true
+uv python pin --global 3.12 2>/dev/null || true
+ln -sf $HOME/.local/bin/python3.12 $HOME/.local/bin/python 2>/dev/null || true
+ln -sf $HOME/.local/bin/python3.12 $HOME/.local/bin/python3 2>/dev/null || true
+uv tool install pipx 2>/dev/null || true
+pipx ensurepath 2>/dev/null || true
 '
 
 # Start Coder agent
