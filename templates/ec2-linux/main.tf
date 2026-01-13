@@ -225,8 +225,8 @@ data "coder_workspace_owner" "me" {}
 
 locals {
   # Architecture and instance type configuration
-  gpu_instance_types       = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge"]
-  arm64_instance_types     = ["c7g.2xlarge", "c8g.2xlarge"]
+  gpu_instance_types         = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge"]
+  arm64_instance_types       = ["c7g.2xlarge", "c8g.2xlarge"]
   gpu_instances_needing_raid = ["g6e.12xlarge", "p5.48xlarge"]
 
   is_gpu_instance   = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
@@ -359,6 +359,35 @@ module "kiro" {
   version  = "1.1.0"
   agent_id = coder_agent.dev[0].id
   folder   = "/home/${local.linux_user}"
+}
+
+# Claude Code environment variables for AWS Bedrock
+# Note: Claude Code module removed due to curl compatibility issues with Ubuntu 20.04
+# Claude Code is installed via npm in userdata.sh instead
+
+resource "coder_env" "bedrock_use" {
+  count    = data.coder_workspace.me.start_count
+  agent_id = coder_agent.dev[0].id
+  name     = "CLAUDE_CODE_USE_BEDROCK"
+  value    = "1"
+}
+resource "coder_env" "aws_region" {
+  count    = data.coder_workspace.me.start_count
+  agent_id = coder_agent.dev[0].id
+  name     = "AWS_REGION"
+  value    = "us-east-1"
+}
+resource "coder_env" "anthropic_model" {
+  count    = data.coder_workspace.me.start_count
+  agent_id = coder_agent.dev[0].id
+  name     = "ANTHROPIC_MODEL"
+  value    = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+}
+resource "coder_env" "anthropic_small_fast_model" {
+  count    = data.coder_workspace.me.start_count
+  agent_id = coder_agent.dev[0].id
+  name     = "ANTHROPIC_SMALL_FAST_MODEL"
+  value    = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 }
 
 # JupyterLab module with pipx properly installed in userdata
