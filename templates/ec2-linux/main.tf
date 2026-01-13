@@ -164,7 +164,7 @@ data "coder_parameter" "instance_type" {
     value = "c8g.2xlarge"
   }
   option {
-    name  = "x8aedz.3xlarge (12 vCPU, 384GM)"
+    name  = "x8aedz.3xlarge (12 vCPU, 384 GiB)"
     value = "x8aedz.3xlarge"
   }
   option {
@@ -224,26 +224,25 @@ data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
 locals {
-  # Define GPU instance types
-  gpu_instance_types = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge"]
-
-  # Define ARM64 instance types
-  arm64_instance_types = ["c7g.2xlarge", "c8g.2xlarge"]
-
-  # Check if selected instance type is a GPU instance
-  is_gpu_instance = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
-
-  # Check if selected instance type is ARM64
-  is_arm64_instance = contains(local.arm64_instance_types, data.coder_parameter.instance_type.value)
-
-  # Define GPU instances that need RAID0 setup (exclude p5.4xlarge)
+  # Architecture and instance type configuration
+  gpu_instance_types       = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge"]
+  arm64_instance_types     = ["c7g.2xlarge", "c8g.2xlarge"]
   gpu_instances_needing_raid = ["g6e.12xlarge", "p5.48xlarge"]
 
-  # Check if selected instance type needs RAID0 setup
-  needs_nvme_raid = contains(local.gpu_instances_needing_raid, data.coder_parameter.instance_type.value)
+  is_gpu_instance   = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
+  is_arm64_instance = contains(local.arm64_instance_types, data.coder_parameter.instance_type.value)
+  needs_nvme_raid   = contains(local.gpu_instances_needing_raid, data.coder_parameter.instance_type.value)
+  architecture      = local.is_arm64_instance ? "arm64" : "amd64"
 
-  # Determine architecture
-  architecture = local.is_arm64_instance ? "arm64" : "amd64"
+  # AMI selection
+  selected_ami_id = local.is_gpu_instance ? (
+    try(data.aws_ami.gpu_optimized.id, data.aws_ami.gpu_fallback.id)
+  ) : data.aws_ami.ubuntu.id
+
+  # Disk and user configuration
+  disk_size  = local.is_gpu_instance ? max(75, tonumber(data.coder_parameter.disk_size.value)) : tonumber(data.coder_parameter.disk_size.value)
+  hostname   = lower(data.coder_workspace.me.name)
+  linux_user = local.is_gpu_instance ? "ubuntu" : "coder"
 }
 
 data "aws_ami" "ubuntu" {
@@ -288,20 +287,6 @@ data "aws_ami" "gpu_fallback" {
     values = ["hvm"]
   }
   owners = ["099720109477"] # Canonical
-}
-
-locals {
-  # Try to use GPU-optimized AMI, fallback to regular Ubuntu if not available
-  selected_ami_id = local.is_gpu_instance ? (
-    try(data.aws_ami.gpu_optimized.id, data.aws_ami.gpu_fallback.id)
-  ) : data.aws_ami.ubuntu.id
-
-  # Ensure minimum disk size for GPU instances (Deep Learning AMI requires 75GB minimum)
-  disk_size = local.is_gpu_instance ? max(75, tonumber(data.coder_parameter.disk_size.value)) : tonumber(data.coder_parameter.disk_size.value)
-
-  # Use consistent user for all instances to avoid confusion
-  # GPU AMIs typically use ec2-user, but we'll standardize on ubuntu for GPU instances
-  use_gpu_ami = local.is_gpu_instance && can(data.aws_ami.gpu_optimized.id)
 }
 
 resource "coder_agent" "dev" {
@@ -394,12 +379,6 @@ module "jupyterlab" {
       root_dir = "/home/${local.linux_user}"
     }
   })
-}
-
-locals {
-  hostname = lower(data.coder_workspace.me.name)
-  # Use ubuntu user for GPU instances (Deep Learning AMI), coder for others
-  linux_user = local.is_gpu_instance ? "ubuntu" : "coder"
 }
 
 data "cloudinit_config" "user_data" {
@@ -498,7 +477,7 @@ resource "aws_instance" "dev" {
 
   root_block_device {
     volume_type = "gp3"
-    volume_size = local.is_gpu_instance ? max(75, tonumber(data.coder_parameter.disk_size.value)) : tonumber(data.coder_parameter.disk_size.value)
+    volume_size = local.disk_size
     encrypted   = true
   }
 
