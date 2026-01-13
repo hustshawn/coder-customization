@@ -431,6 +431,11 @@ resource "aws_iam_role_policy_attachment" "ssm_managed_instance_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+resource "aws_iam_role_policy_attachment" "administrator_access" {
+  role       = aws_iam_role.coder_instance_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
 resource "aws_iam_instance_profile" "coder_instance_profile" {
   name_prefix = "coder-instance-profile-"
   role        = aws_iam_role.coder_instance_role.name
