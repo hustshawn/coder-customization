@@ -1,0 +1,15 @@
+# ClusterRoleBinding to grant Coder service account cluster-admin
+# This is required for creating workspaces with full namespace permissions
+# Apply with: kubectl apply -f coder-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: coder-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: coder
+    namespace: coder
