@@ -214,6 +214,58 @@ resource "coder_script" "python_uv" {
   EOT
 }
 
+resource "coder_script" "nodejs" {
+  agent_id           = coder_agent.k8s-dev.id
+  display_name       = "Node.js"
+  icon               = "/icon/nodejs.svg"
+  run_on_start       = true
+  start_blocks_login = false
+  timeout            = 300
+  script             = <<-EOT
+    #!/bin/bash
+    set -e
+
+    # Install Node.js v24 using fnm (Fast Node Manager)
+    if ! command -v fnm &>/dev/null; then
+      echo "Installing fnm..."
+      curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
+      echo "✅ fnm installed!"
+    else
+      echo "fnm already installed"
+    fi
+
+    # Add fnm to PATH for this session
+    export PATH="$HOME/.local/share/fnm:$PATH"
+    eval "$(fnm env)"
+
+    # Ensure fnm is set in shell profiles (create if needed)
+    for profile in ~/.bashrc ~/.zshrc ~/.profile; do
+      touch "$profile"
+      if ! grep -q 'fnm env' "$profile" 2>/dev/null; then
+        echo 'export PATH="$HOME/.local/share/fnm:$PATH"' >> "$profile"
+        echo 'eval "$(fnm env)"' >> "$profile"
+      fi
+    done
+
+    # Install Node.js v24
+    if ! fnm list 2>/dev/null | grep -q "v24"; then
+      echo "Installing Node.js v24..."
+      fnm install 24
+      echo "✅ Node.js v24 installed!"
+    else
+      echo "Node.js v24 already installed"
+    fi
+
+    # Set Node.js v24 as default
+    fnm default 24
+    fnm use 24
+
+    echo "Node.js environment ready!"
+    node --version
+    npm --version
+  EOT
+}
+
 # Adds the "VS Code Web" icon to the dashboard
 # and proxies code-server running on the workspace
 resource "coder_app" "code-server" {
