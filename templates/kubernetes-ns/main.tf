@@ -19,51 +19,31 @@ provider "kubernetes" {
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
-data "coder_parameter" "node_instance_type" {
-  name         = "node_instance_type"
-  display_name = "Node Instance Type"
-  description  = "EC2 instance type for the Kubernetes node"
-  default      = "c7i.xlarge"
+data "coder_parameter" "resource_size" {
+  name         = "resource_size"
+  display_name = "Resource Size"
+  description  = "CPU and memory resources for your workspace"
+  default      = "medium"
   mutable      = false
   option {
-    name  = "c7i.xlarge (4 vCPU, 8 GB) - Intel"
-    value = "c7i.xlarge"
+    name  = "Small (2 vCPU, 4 GB)"
+    value = "small"
   }
   option {
-    name  = "c7i.2xlarge (8 vCPU, 16 GB) - Intel"
-    value = "c7i.2xlarge"
+    name  = "Medium (4 vCPU, 8 GB)"
+    value = "medium"
   }
   option {
-    name  = "c7i.4xlarge (16 vCPU, 32 GB) - Intel"
-    value = "c7i.4xlarge"
+    name  = "Large (8 vCPU, 16 GB)"
+    value = "large"
   }
   option {
-    name  = "c8g.xlarge (4 vCPU, 8 GB) - Graviton4"
-    value = "c8g.xlarge"
+    name  = "XLarge (16 vCPU, 32 GB)"
+    value = "xlarge"
   }
   option {
-    name  = "c8g.2xlarge (8 vCPU, 16 GB) - Graviton4"
-    value = "c8g.2xlarge"
-  }
-  option {
-    name  = "c8g.4xlarge (16 vCPU, 32 GB) - Graviton4"
-    value = "c8g.4xlarge"
-  }
-  option {
-    name  = "m7i.xlarge (4 vCPU, 16 GB) - Intel"
-    value = "m7i.xlarge"
-  }
-  option {
-    name  = "m7i.2xlarge (8 vCPU, 32 GB) - Intel"
-    value = "m7i.2xlarge"
-  }
-  option {
-    name  = "r7i.xlarge (4 vCPU, 32 GB) - Intel Memory"
-    value = "r7i.xlarge"
-  }
-  option {
-    name  = "r7i.2xlarge (8 vCPU, 64 GB) - Intel Memory"
-    value = "r7i.2xlarge"
+    name  = "Memory Optimized (8 vCPU, 64 GB)"
+    value = "memory"
   }
 }
 
@@ -71,16 +51,8 @@ data "coder_parameter" "storage_size" {
   name         = "storage_size"
   display_name = "Storage Size"
   description  = "Persistent storage size for your workspace"
-  default      = "20"
+  default      = "50"
   mutable      = true
-  option {
-    name  = "10 GB"
-    value = "10"
-  }
-  option {
-    name  = "20 GB"
-    value = "20"
-  }
   option {
     name  = "50 GB"
     value = "50"
@@ -106,24 +78,15 @@ locals {
     "app.kubernetes.io/managed-by" = "coder"
   }
 
-  # Map node instance type to pod resources (leaving ~0.5 CPU and ~0.5Gi for system)
-  instance_resources = {
-    "c7i.xlarge"   = { cpu = "3500m", memory = "7Gi" }
-    "c7i.2xlarge"  = { cpu = "7500m", memory = "15Gi" }
-    "c7i.4xlarge"  = { cpu = "15500m", memory = "31Gi" }
-    "c8g.xlarge"   = { cpu = "3500m", memory = "7Gi" }
-    "c8g.2xlarge"  = { cpu = "7500m", memory = "15Gi" }
-    "c8g.4xlarge"  = { cpu = "15500m", memory = "31Gi" }
-    "m7i.xlarge"   = { cpu = "3500m", memory = "15Gi" }
-    "m7i.2xlarge"  = { cpu = "7500m", memory = "31Gi" }
-    "r7i.xlarge"   = { cpu = "3500m", memory = "31Gi" }
-    "r7i.2xlarge"  = { cpu = "7500m", memory = "63Gi" }
+  # Map resource size to pod resources
+  size_resources = {
+    "small"  = { cpu = "2", memory = "4Gi" }
+    "medium" = { cpu = "4", memory = "8Gi" }
+    "large"  = { cpu = "8", memory = "16Gi" }
+    "xlarge" = { cpu = "16", memory = "32Gi" }
+    "memory" = { cpu = "8", memory = "64Gi" }
   }
-  resources = local.instance_resources[data.coder_parameter.node_instance_type.value]
-
-  # Detect architecture based on instance type (c8g, m8g, r8g are ARM/Graviton)
-  is_arm64 = can(regex("^[a-z][0-9]g\\.", data.coder_parameter.node_instance_type.value))
-  arch     = local.is_arm64 ? "arm64" : "amd64"
+  resources = local.size_resources[data.coder_parameter.resource_size.value]
 }
 
 resource "kubernetes_namespace" "workspace" {
@@ -173,13 +136,13 @@ resource "kubernetes_role_binding" "set_workspace_permissions" {
 
 # The Coder agent allows the workspace owner
 # to connect to the pod from a web or local IDE
-resource "coder_agent" "primary" {
+resource "coder_agent" "k8s-dev" {
   os   = "linux"
-  arch = local.arch
+  arch = "amd64"
 }
 
 resource "coder_script" "code_server" {
-  agent_id           = coder_agent.primary.id
+  agent_id           = coder_agent.k8s-dev.id
   display_name       = "Code Server"
   icon               = "/icon/code.svg"
   run_on_start       = true
@@ -196,7 +159,7 @@ resource "coder_script" "code_server" {
 }
 
 resource "coder_script" "python_uv" {
-  agent_id           = coder_agent.primary.id
+  agent_id           = coder_agent.k8s-dev.id
   display_name       = "Python (UV)"
   icon               = "/icon/python.svg"
   run_on_start       = true
@@ -254,7 +217,7 @@ resource "coder_script" "python_uv" {
 # Adds the "VS Code Web" icon to the dashboard
 # and proxies code-server running on the workspace
 resource "coder_app" "code-server" {
-  agent_id     = coder_agent.primary.id
+  agent_id     = coder_agent.k8s-dev.id
   display_name = "VS Code Web"
   slug         = "code-server"
   url          = "http://localhost:13337/"
@@ -284,9 +247,9 @@ resource "kubernetes_pod" "primary" {
   spec {
     service_account_name = kubernetes_service_account.workspace_service_account.metadata[0].name
 
-    # Select node based on instance type
+    # Force amd64 nodes since the image doesn't support ARM
     node_selector = {
-      "node.kubernetes.io/instance-type" = data.coder_parameter.node_instance_type.value
+      "kubernetes.io/arch" = "amd64"
     }
 
     security_context {
@@ -315,10 +278,10 @@ resource "kubernetes_pod" "primary" {
       }
 
       # Starts the Coder agent
-      command = ["sh", "-c", coder_agent.primary.init_script]
+      command = ["sh", "-c", coder_agent.k8s-dev.init_script]
       env {
         name  = "CODER_AGENT_TOKEN"
-        value = coder_agent.primary.token
+        value = coder_agent.k8s-dev.token
       }
 
       # Mounts /home/coder. Developers should keep
@@ -365,12 +328,8 @@ resource "coder_metadata" "primary_metadata" {
   resource_id = kubernetes_pod.primary[0].id
   icon        = "https://svgur.com/i/qrK.svg"
   item {
-    key   = "node type"
-    value = data.coder_parameter.node_instance_type.value
-  }
-  item {
-    key   = "arch"
-    value = local.arch
+    key   = "size"
+    value = data.coder_parameter.resource_size.value
   }
   item {
     key   = "cpu"
