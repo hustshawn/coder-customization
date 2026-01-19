@@ -214,7 +214,21 @@ data "coder_parameter" "disk_size" {
   }
 }
 
-
+data "coder_parameter" "spot_instance" {
+  name         = "spot_instance"
+  display_name = "Spot Instance"
+  description  = "Use spot instances for up to 90% cost savings. Spot instances may be interrupted when AWS needs capacity."
+  default      = "false"
+  mutable      = false
+  option {
+    name  = "On-Demand (Guaranteed availability)"
+    value = "false"
+  }
+  option {
+    name  = "Spot (Up to 90% savings, may be interrupted)"
+    value = "true"
+  }
+}
 
 provider "aws" {
   region = data.coder_parameter.region.value
@@ -231,6 +245,7 @@ locals {
 
   is_gpu_instance   = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
   is_arm64_instance = contains(local.arm64_instance_types, data.coder_parameter.instance_type.value)
+  is_spot_instance  = data.coder_parameter.spot_instance.value == "true"
   needs_nvme_raid   = contains(local.gpu_instances_needing_raid, data.coder_parameter.instance_type.value)
   architecture      = local.is_arm64_instance ? "arm64" : "amd64"
 
@@ -502,6 +517,18 @@ resource "aws_instance" "dev" {
   vpc_security_group_ids = [aws_security_group.coder_workspace.id]
   iam_instance_profile   = aws_iam_instance_profile.coder_instance_profile.name
 
+  # Spot instance configuration (only when spot is selected)
+  dynamic "instance_market_options" {
+    for_each = local.is_spot_instance ? [1] : []
+    content {
+      market_type = "spot"
+      spot_options {
+        spot_instance_type             = "persistent"
+        instance_interruption_behavior = "stop"
+      }
+    }
+  }
+
   # Fix IMDSv2 configuration for agent authentication
   metadata_options {
     http_endpoint               = "enabled"
@@ -545,6 +572,13 @@ resource "coder_metadata" "workspace_info" {
     content {
       key   = "nvme storage"
       value = "RAID0 configured (available at ~/nvme-storage)"
+    }
+  }
+  dynamic "item" {
+    for_each = local.is_spot_instance ? [1] : []
+    content {
+      key   = "pricing"
+      value = "Spot Instance (may be interrupted)"
     }
   }
 }
