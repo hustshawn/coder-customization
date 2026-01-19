@@ -179,6 +179,10 @@ data "coder_parameter" "instance_type" {
     name  = "p5.48xlarge - 8xH100"
     value = "p5.48xlarge"
   }
+  option {
+    name  = "p5en.48xlarge - 8xH200"
+    value = "p5en.48xlarge"
+  }
 
 }
 
@@ -239,9 +243,9 @@ data "coder_workspace_owner" "me" {}
 
 locals {
   # Architecture and instance type configuration
-  gpu_instance_types         = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge"]
+  gpu_instance_types         = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge", "p5en.48xlarge"]
   arm64_instance_types       = ["c7g.2xlarge", "c8g.2xlarge"]
-  gpu_instances_needing_raid = ["g6e.12xlarge", "p5.48xlarge"]
+  gpu_instances_needing_raid = ["g6e.12xlarge", "p5.48xlarge", "p5en.48xlarge"]
 
   is_gpu_instance   = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
   is_arm64_instance = contains(local.arm64_instance_types, data.coder_parameter.instance_type.value)
