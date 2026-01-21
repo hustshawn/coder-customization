@@ -89,7 +89,7 @@ locals {
   resources = local.size_resources[data.coder_parameter.resource_size.value]
 }
 
-resource "kubernetes_namespace" "workspace" {
+resource "kubernetes_namespace_v1" "workspace" {
   metadata {
     name   = local.name
     labels = local.labels
@@ -97,7 +97,7 @@ resource "kubernetes_namespace" "workspace" {
 }
 
 resource "coder_metadata" "namespace-info" {
-  resource_id = kubernetes_namespace.workspace.id
+  resource_id = kubernetes_namespace_v1.workspace.id
   icon        = "https://svgur.com/i/qsx.svg"
   item {
     key   = "name in cluster"
@@ -106,20 +106,20 @@ resource "coder_metadata" "namespace-info" {
 }
 
 # ServiceAccount for the workspace
-resource "kubernetes_service_account" "workspace_service_account" {
+resource "kubernetes_service_account_v1" "workspace_service_account" {
   metadata {
     name      = local.name
-    namespace = kubernetes_namespace.workspace.metadata[0].name
+    namespace = kubernetes_namespace_v1.workspace.metadata[0].name
     labels    = local.labels
   }
 }
 
 # Gives the ServiceAccount admin access to the
 # namespace created for this workspace
-resource "kubernetes_role_binding" "set_workspace_permissions" {
+resource "kubernetes_role_binding_v1" "set_workspace_permissions" {
   metadata {
     name      = local.name
-    namespace = kubernetes_namespace.workspace.metadata[0].name
+    namespace = kubernetes_namespace_v1.workspace.metadata[0].name
     labels    = local.labels
   }
   role_ref {
@@ -129,8 +129,8 @@ resource "kubernetes_role_binding" "set_workspace_permissions" {
   }
   subject {
     kind      = "ServiceAccount"
-    name      = kubernetes_service_account.workspace_service_account.metadata[0].name
-    namespace = kubernetes_namespace.workspace.metadata[0].name
+    name      = kubernetes_service_account_v1.workspace_service_account.metadata[0].name
+    namespace = kubernetes_namespace_v1.workspace.metadata[0].name
   }
 }
 
@@ -139,6 +139,14 @@ resource "kubernetes_role_binding" "set_workspace_permissions" {
 resource "coder_agent" "k8s-dev" {
   os   = "linux"
   arch = "amd64"
+
+  # Claude Code configuration for AWS Bedrock
+  env = {
+    CLAUDE_CODE_USE_BEDROCK    = "1"
+    AWS_REGION                 = "us-east-1"
+    ANTHROPIC_MODEL            = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    ANTHROPIC_SMALL_FAST_MODEL = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+  }
 }
 
 resource "coder_script" "code_server" {
@@ -168,6 +176,13 @@ resource "coder_script" "python_uv" {
   script             = <<-EOT
     #!/bin/bash
     set -e
+
+    # Skip if already setup
+    MARKER="$HOME/.setup_done/python_uv"
+    if [ -f "$MARKER" ]; then
+      echo "Python/UV already configured, skipping..."
+      exit 0
+    fi
 
     # Install UV if not already installed
     if ! command -v uv &>/dev/null; then
@@ -208,6 +223,10 @@ resource "coder_script" "python_uv" {
     # Pin Python version globally
     echo "3.13" > ~/.python-version
 
+    # Mark setup as complete
+    mkdir -p "$(dirname "$MARKER")"
+    touch "$MARKER"
+
     echo "Python environment ready!"
     uv --version
     python --version
@@ -224,6 +243,13 @@ resource "coder_script" "nodejs" {
   script             = <<-EOT
     #!/bin/bash
     set -e
+
+    # Skip if already setup
+    MARKER="$HOME/.setup_done/nodejs"
+    if [ -f "$MARKER" ]; then
+      echo "Node.js already configured, skipping..."
+      exit 0
+    fi
 
     # Install Node.js v24 using fnm (Fast Node Manager)
     if ! command -v fnm &>/dev/null; then
@@ -260,9 +286,68 @@ resource "coder_script" "nodejs" {
     fnm default 24
     fnm use 24
 
+    # Mark setup as complete
+    mkdir -p "$(dirname "$MARKER")"
+    touch "$MARKER"
+
     echo "Node.js environment ready!"
     node --version
     npm --version
+  EOT
+}
+
+resource "coder_script" "claude_code" {
+  agent_id           = coder_agent.k8s-dev.id
+  display_name       = "Claude Code"
+  icon               = "/icon/claude.svg"
+  run_on_start       = true
+  start_blocks_login = false
+  timeout            = 300
+  script             = <<-EOT
+    #!/bin/bash
+    set -e
+
+    # Skip if already setup
+    MARKER="$HOME/.setup_done/claude_code"
+    if [ -f "$MARKER" ]; then
+      echo "Claude Code already configured, skipping..."
+      exit 0
+    fi
+
+    # Wait for fnm and Node.js to be installed (Node.js script runs in parallel)
+    export PATH="$HOME/.local/share/fnm:$PATH"
+
+    for i in {1..30}; do
+      if command -v fnm &>/dev/null; then
+        eval "$(fnm env --shell bash)" 2>/dev/null || true
+        if command -v npm &>/dev/null; then
+          break
+        fi
+      fi
+      echo "Waiting for npm to be available..."
+      sleep 2
+    done
+
+    if ! command -v npm &>/dev/null; then
+      echo "❌ npm not found after waiting, skipping Claude Code installation"
+      exit 0
+    fi
+
+    # Install Claude Code globally via npm
+    if ! command -v claude &>/dev/null; then
+      echo "Installing Claude Code..."
+      npm install -g @anthropic-ai/claude-code
+      echo "✅ Claude Code installed!"
+    else
+      echo "Claude Code already installed"
+    fi
+
+    # Mark setup as complete
+    mkdir -p "$(dirname "$MARKER")"
+    touch "$MARKER"
+
+    echo "Claude Code ready!"
+    claude --version || true
   EOT
 }
 
@@ -286,18 +371,18 @@ resource "coder_app" "code-server" {
 
 # Creates a pod on the workspace namepace, allowing
 # the developer to connect.
-resource "kubernetes_pod" "primary" {
+resource "kubernetes_pod_v1" "primary" {
 
   # Pod is ephemeral. Re-created when a workspace starts/stops.
   count = data.coder_workspace.me.start_count
 
   metadata {
     name      = "primary"
-    namespace = kubernetes_namespace.workspace.metadata[0].name
+    namespace = kubernetes_namespace_v1.workspace.metadata[0].name
     labels    = local.labels
   }
   spec {
-    service_account_name = kubernetes_service_account.workspace_service_account.metadata[0].name
+    service_account_name = kubernetes_service_account_v1.workspace_service_account.metadata[0].name
 
     # Force amd64 nodes since the image doesn't support ARM
     node_selector = {
@@ -347,7 +432,7 @@ resource "kubernetes_pod" "primary" {
     volume {
       name = "home"
       persistent_volume_claim {
-        claim_name = kubernetes_persistent_volume_claim.home.metadata.0.name
+        claim_name = kubernetes_persistent_volume_claim_v1.home.metadata.0.name
         read_only  = false
       }
     }
@@ -356,10 +441,10 @@ resource "kubernetes_pod" "primary" {
 
 # Creates a persistent volume for developers
 # to store their repos/files
-resource "kubernetes_persistent_volume_claim" "home" {
+resource "kubernetes_persistent_volume_claim_v1" "home" {
   metadata {
     name      = "primary-disk"
-    namespace = kubernetes_namespace.workspace.metadata[0].name
+    namespace = kubernetes_namespace_v1.workspace.metadata[0].name
     labels    = local.labels
   }
   wait_until_bound = false
@@ -377,7 +462,7 @@ resource "kubernetes_persistent_volume_claim" "home" {
 
 resource "coder_metadata" "primary_metadata" {
   count       = data.coder_workspace.me.start_count
-  resource_id = kubernetes_pod.primary[0].id
+  resource_id = kubernetes_pod_v1.primary[0].id
   icon        = "https://svgur.com/i/qrK.svg"
   item {
     key   = "size"
@@ -391,10 +476,14 @@ resource "coder_metadata" "primary_metadata" {
     key   = "memory"
     value = local.resources.memory
   }
+  item {
+    key   = "service_account_name "
+    value = kubernetes_service_account_v1.workspace_service_account.metadata[0].name
+  }
 }
 
 resource "coder_metadata" "pvc_metadata" {
-  resource_id = kubernetes_persistent_volume_claim.home.id
+  resource_id = kubernetes_persistent_volume_claim_v1.home.id
   icon        = "https://svgur.com/i/qt5.svg"
   item {
     key   = "size"
@@ -407,14 +496,22 @@ resource "coder_metadata" "pvc_metadata" {
 }
 
 resource "coder_metadata" "service_account_metadata" {
-  resource_id = kubernetes_service_account.workspace_service_account.id
+  resource_id = kubernetes_service_account_v1.workspace_service_account.id
   icon        = "https://svgur.com/i/qrv.svg"
-  hide        = true
+  hide        = false
+  item {
+    key   = "name"
+    value = kubernetes_service_account_v1.workspace_service_account.metadata[0].name
+  }
+  item {
+    key   = "namespace"
+    value = kubernetes_service_account_v1.workspace_service_account.metadata[0].namespace
+  }
 }
 
 
 resource "coder_metadata" "role_binding_metadata" {
-  resource_id = kubernetes_role_binding.set_workspace_permissions.id
+  resource_id = kubernetes_role_binding_v1.set_workspace_permissions.id
   icon        = "https://svgur.com/i/qs7.svg"
   hide        = true
 }
