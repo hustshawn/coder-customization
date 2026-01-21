@@ -137,6 +137,27 @@ data "coder_parameter" "custom_region" {
   order        = 2
 }
 
+data "coder_parameter" "use_custom_az" {
+  name         = "use_custom_az"
+  display_name = "Specify Availability Zone"
+  description  = "Enable to specify a specific availability zone. If disabled, AWS will select one automatically."
+  type         = "bool"
+  default      = "false"
+  mutable      = false
+  order        = 3
+}
+
+data "coder_parameter" "custom_az" {
+  count        = data.coder_parameter.use_custom_az.value == "true" ? 1 : 0
+  name         = "custom_az"
+  display_name = "Availability Zone Suffix"
+  description  = "Enter the AZ suffix (e.g., 'a', 'b', 'c'). The full AZ will be region + suffix (e.g., us-west-2a)."
+  type         = "string"
+  default      = "a"
+  mutable      = false
+  order        = 4
+}
+
 data "coder_parameter" "instance_type" {
   name         = "instance_type"
   display_name = "Instance type"
@@ -213,7 +234,7 @@ data "coder_parameter" "use_custom_instance_type" {
   type         = "bool"
   default      = "false"
   mutable      = false
-  order        = 3
+  order        = 5
 }
 
 data "coder_parameter" "custom_instance_type" {
@@ -223,7 +244,7 @@ data "coder_parameter" "custom_instance_type" {
   description  = "Enter any valid EC2 instance type (e.g., m6i.xlarge, r6g.2xlarge)"
   type         = "string"
   mutable      = false
-  order        = 4
+  order        = 6
 }
 
 data "coder_parameter" "custom_architecture" {
@@ -233,7 +254,7 @@ data "coder_parameter" "custom_architecture" {
   description  = "Select the CPU architecture for your custom instance type. ARM64 (Graviton) instance types typically have 'g' in the name (e.g., m6g, c7g, r6g)."
   default      = "x86_64"
   mutable      = false
-  order        = 5
+  order        = 7
   option {
     name  = "x86_64 (Intel/AMD)"
     value = "x86_64"
@@ -252,7 +273,7 @@ data "coder_parameter" "custom_is_gpu" {
   type         = "bool"
   default      = "false"
   mutable      = false
-  order        = 6
+  order        = 8
 }
 
 data "coder_parameter" "disk_size" {
@@ -307,14 +328,22 @@ data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
 locals {
-  # Effective region and instance type (custom or predefined)
+  # Effective region, AZ, and instance type (custom or predefined)
   use_custom_region        = data.coder_parameter.use_custom_region.value == "true"
+  use_custom_az            = data.coder_parameter.use_custom_az.value == "true"
   use_custom_instance_type = data.coder_parameter.use_custom_instance_type.value == "true"
 
   effective_region = (
     local.use_custom_region
     ? data.coder_parameter.custom_region[0].value
     : data.coder_parameter.region.value
+  )
+
+  # AZ is null when not specified (AWS picks automatically)
+  effective_az = (
+    local.use_custom_az
+    ? "${local.effective_region}${data.coder_parameter.custom_az[0].value}"
+    : null
   )
 
   effective_instance_type = (
@@ -613,6 +642,7 @@ resource "aws_security_group" "coder_workspace" {
 
 resource "aws_instance" "dev" {
   ami                    = local.selected_ami_id
+  availability_zone      = local.effective_az
   instance_type          = local.effective_instance_type
   vpc_security_group_ids = [aws_security_group.coder_workspace.id]
   iam_instance_profile   = aws_iam_instance_profile.coder_instance_profile.name
@@ -659,6 +689,13 @@ resource "coder_metadata" "workspace_info" {
     key   = "region"
     value = local.effective_region
   }
+  dynamic "item" {
+    for_each = local.use_custom_az ? [1] : []
+    content {
+      key   = "AZ"
+      value = local.effective_az
+    }
+  }
   item {
     key   = "instance type"
     value = aws_instance.dev.instance_type
@@ -671,14 +708,14 @@ resource "coder_metadata" "workspace_info" {
     for_each = local.needs_nvme_raid ? [1] : []
     content {
       key   = "nvme storage"
-      value = "RAID0 configured (available at ~/nvme-storage)"
+      value = "RAID0(~/nvme-storage)"
     }
   }
   dynamic "item" {
     for_each = local.is_spot_instance ? [1] : []
     content {
-      key   = "pricing"
-      value = "Spot Instance (may be interrupted)"
+      key   = "purchase option"
+      value = "Spot"
     }
   }
 }
