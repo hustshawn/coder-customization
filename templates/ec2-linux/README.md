@@ -90,16 +90,29 @@ Coder uses `aws_ec2_instance_state` to start and stop the VM. This template is f
 
 ### Multi-Region Support
 The template supports deployment across multiple AWS regions with intuitive country flag icons:
-- **Asia Pacific**: Tokyo 🇯🇵, Jakarta 🇮🇩, Mumbai 🇮🇳, Singapore 🇸🇬, Sydney 🇦🇺
-- **Europe**: Ireland 🇪🇺  
+- **Asia Pacific**: Tokyo 🇯🇵, Jakarta 🇮🇩, Hong Kong 🇭🇰, Mumbai 🇮🇳, Singapore 🇸🇬, Sydney 🇦🇺
+- **Europe**: Ireland 🇪🇺
 - **US**: N. Virginia, Ohio, Oregon 🇺🇸
+- **Custom Region**: Enable custom region option to specify any valid AWS region
+
+### Availability Zone
+Optionally specify a specific AZ (a, b, c, etc.) or let AWS select automatically.
 
 ### Instance Types
-- **General Purpose**: t3.micro (2 vCPU, 1GB) to t3.2xlarge (8 vCPU, 32GB)
-- **GPU Instances**: g6e.12xlarge (4xL40S), p5.4xlarge (1xH100)
+- **General Purpose**: t3.micro to t3.2xlarge
+- **Compute Optimized**: c7i.2xlarge, c8i.2xlarge (x86), c7g.2xlarge, c8g.2xlarge (ARM64)
+- **Memory Optimized**: x8aedz.3xlarge (384 GiB RAM)
+- **GPU Instances**: g6e.12xlarge (4xL40S), p5.4xlarge (1xH100), p5.48xlarge (8xH100), p5en.48xlarge (8xH200)
+- **Custom Instance Type**: Enable custom option to specify any valid EC2 instance type with architecture selection
+
+### Auto GPU Detection
+GPU instances are automatically detected based on instance family (p3-p5en, g4dn-g7i, dl1-dl2q, inf1-inf2, trn1-trn2) and use the appropriate Deep Learning AMI.
+
+### Spot Instances
+Option to use Spot instances for up to 90% cost savings. Spot instances use persistent spot requests with stop behavior on interruption.
 
 ### Storage Options
-Configurable EBS storage from 20GB to 1TB with GP3 volumes and encryption enabled by default.
+Configurable EBS storage from 75GB to 2TB with GP3 volumes and encryption enabled by default.
 
 ### Pre-installed Development Tools
 - **Code Server**: Web-based VS Code accessible through the dashboard
