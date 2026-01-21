@@ -119,7 +119,7 @@ data "coder_parameter" "region" {
 
 data "coder_parameter" "use_custom_region" {
   name         = "use_custom_region"
-  display_name = "Use Custom Region"
+  display_name = "[Optional] Use Custom Region"
   description  = "Enable to specify a custom AWS region not in the dropdown list."
   type         = "bool"
   default      = "false"
@@ -139,7 +139,7 @@ data "coder_parameter" "custom_region" {
 
 data "coder_parameter" "use_custom_az" {
   name         = "use_custom_az"
-  display_name = "Specify Availability Zone"
+  display_name = "[Optional] Specify Availability Zone"
   description  = "Enable to specify a specific availability zone. If disabled, AWS will select one automatically."
   type         = "bool"
   default      = "false"
@@ -229,7 +229,7 @@ data "coder_parameter" "instance_type" {
 
 data "coder_parameter" "use_custom_instance_type" {
   name         = "use_custom_instance_type"
-  display_name = "Use Custom Instance Type"
+  display_name = "[Optional] Use Custom Instance Type"
   description  = "Enable to specify a custom EC2 instance type not in the dropdown list."
   type         = "bool"
   default      = "false"
@@ -250,7 +250,7 @@ data "coder_parameter" "custom_instance_type" {
 data "coder_parameter" "custom_architecture" {
   count        = data.coder_parameter.use_custom_instance_type.value == "true" ? 1 : 0
   name         = "custom_architecture"
-  display_name = "Instance Architecture"
+  display_name = "[Optional] Instance Architecture"
   description  = "Select the CPU architecture for your custom instance type. ARM64 (Graviton) instance types typically have 'g' in the name (e.g., m6g, c7g, r6g)."
   default      = "x86_64"
   mutable      = false
@@ -263,17 +263,6 @@ data "coder_parameter" "custom_architecture" {
     name  = "ARM64 (Graviton)"
     value = "arm64"
   }
-}
-
-data "coder_parameter" "custom_is_gpu" {
-  count        = data.coder_parameter.use_custom_instance_type.value == "true" ? 1 : 0
-  name         = "custom_is_gpu"
-  display_name = "GPU Instance"
-  description  = "Is this a GPU instance? GPU instances will use the Deep Learning AMI with NVIDIA drivers pre-installed."
-  type         = "bool"
-  default      = "false"
-  mutable      = false
-  order        = 8
 }
 
 data "coder_parameter" "disk_size" {
@@ -353,16 +342,16 @@ locals {
   )
 
   # Architecture and instance type configuration
-  gpu_instance_types         = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge", "p5en.48xlarge"]
+  # GPU instance families (p = GPU training, g = GPU graphics/inference, dl = deep learning)
+  gpu_instance_families      = ["p3", "p4d", "p4de", "p5", "p5e", "p5en", "g4dn", "g5", "g5g", "g6", "g6e", "g7i", "dl1", "dl2q", "inf1", "inf2", "trn1", "trn1n", "trn2"]
   arm64_instance_types       = ["c7g.2xlarge", "c8g.2xlarge"]
   gpu_instances_needing_raid = ["g6e.12xlarge", "p5.48xlarge", "p5en.48xlarge"]
 
-  # GPU and architecture detection (from predefined list or custom parameter)
-  is_gpu_instance = (
-    local.use_custom_instance_type
-    ? data.coder_parameter.custom_is_gpu[0].value == "true"
-    : contains(local.gpu_instance_types, local.effective_instance_type)
-  )
+  # Extract instance family from instance type (e.g., "p5en" from "p5en.48xlarge")
+  instance_family = split(".", local.effective_instance_type)[0]
+
+  # GPU detection: check if instance family is in the GPU families list
+  is_gpu_instance = contains(local.gpu_instance_families, local.instance_family)
 
   is_arm64_instance = (
     local.use_custom_instance_type
