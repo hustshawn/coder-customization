@@ -12,14 +12,16 @@ TEMPLATE_NAME="$1"
 # Function to push a single template
 push_template() {
     local template="$1"
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local template_path="$script_dir/$TEMPLATES_DIR/$template"
+
     echo "Pushing template: $template"
-    
-    if [ -d "$TEMPLATES_DIR/$template" ]; then
-        # Change to template directory and push
-        (cd "$TEMPLATES_DIR/$template" && coder templates push "$template" -y)
+
+    if [ -d "$template_path" ]; then
+        coder templates push "$template" --directory "$template_path" -y
         echo "✅ Successfully pushed $template"
     else
-        echo "❌ Template directory $TEMPLATES_DIR/$template not found"
+        echo "❌ Template directory $template_path not found"
         return 1
     fi
 }
