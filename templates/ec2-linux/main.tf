@@ -117,6 +117,26 @@ data "coder_parameter" "region" {
   }
 }
 
+data "coder_parameter" "use_custom_region" {
+  name         = "use_custom_region"
+  display_name = "Use Custom Region"
+  description  = "Enable to specify a custom AWS region not in the dropdown list."
+  type         = "bool"
+  default      = "false"
+  mutable      = false
+  order        = 1
+}
+
+data "coder_parameter" "custom_region" {
+  count        = data.coder_parameter.use_custom_region.value == "true" ? 1 : 0
+  name         = "custom_region"
+  display_name = "Custom Region"
+  description  = "Enter any valid AWS region code (e.g., eu-central-1, ap-northeast-2)"
+  type         = "string"
+  mutable      = false
+  order        = 2
+}
+
 data "coder_parameter" "instance_type" {
   name         = "instance_type"
   display_name = "Instance type"
@@ -186,6 +206,55 @@ data "coder_parameter" "instance_type" {
 
 }
 
+data "coder_parameter" "use_custom_instance_type" {
+  name         = "use_custom_instance_type"
+  display_name = "Use Custom Instance Type"
+  description  = "Enable to specify a custom EC2 instance type not in the dropdown list."
+  type         = "bool"
+  default      = "false"
+  mutable      = false
+  order        = 3
+}
+
+data "coder_parameter" "custom_instance_type" {
+  count        = data.coder_parameter.use_custom_instance_type.value == "true" ? 1 : 0
+  name         = "custom_instance_type"
+  display_name = "Custom Instance Type"
+  description  = "Enter any valid EC2 instance type (e.g., m6i.xlarge, r6g.2xlarge)"
+  type         = "string"
+  mutable      = false
+  order        = 4
+}
+
+data "coder_parameter" "custom_architecture" {
+  count        = data.coder_parameter.use_custom_instance_type.value == "true" ? 1 : 0
+  name         = "custom_architecture"
+  display_name = "Instance Architecture"
+  description  = "Select the CPU architecture for your custom instance type. ARM64 (Graviton) instance types typically have 'g' in the name (e.g., m6g, c7g, r6g)."
+  default      = "x86_64"
+  mutable      = false
+  order        = 5
+  option {
+    name  = "x86_64 (Intel/AMD)"
+    value = "x86_64"
+  }
+  option {
+    name  = "ARM64 (Graviton)"
+    value = "arm64"
+  }
+}
+
+data "coder_parameter" "custom_is_gpu" {
+  count        = data.coder_parameter.use_custom_instance_type.value == "true" ? 1 : 0
+  name         = "custom_is_gpu"
+  display_name = "GPU Instance"
+  description  = "Is this a GPU instance? GPU instances will use the Deep Learning AMI with NVIDIA drivers pre-installed."
+  type         = "bool"
+  default      = "false"
+  mutable      = false
+  order        = 6
+}
+
 data "coder_parameter" "disk_size" {
   name         = "disk_size"
   display_name = "Disk Size"
@@ -234,24 +303,47 @@ data "coder_parameter" "spot_instance" {
   }
 }
 
-provider "aws" {
-  region = data.coder_parameter.region.value
-}
-
 data "coder_workspace" "me" {}
 data "coder_workspace_owner" "me" {}
 
 locals {
+  # Effective region and instance type (custom or predefined)
+  use_custom_region        = data.coder_parameter.use_custom_region.value == "true"
+  use_custom_instance_type = data.coder_parameter.use_custom_instance_type.value == "true"
+
+  effective_region = (
+    local.use_custom_region
+    ? data.coder_parameter.custom_region[0].value
+    : data.coder_parameter.region.value
+  )
+
+  effective_instance_type = (
+    local.use_custom_instance_type
+    ? data.coder_parameter.custom_instance_type[0].value
+    : data.coder_parameter.instance_type.value
+  )
+
   # Architecture and instance type configuration
   gpu_instance_types         = ["g6e.12xlarge", "p5.4xlarge", "p5.48xlarge", "p5en.48xlarge"]
   arm64_instance_types       = ["c7g.2xlarge", "c8g.2xlarge"]
   gpu_instances_needing_raid = ["g6e.12xlarge", "p5.48xlarge", "p5en.48xlarge"]
 
-  is_gpu_instance   = contains(local.gpu_instance_types, data.coder_parameter.instance_type.value)
-  is_arm64_instance = contains(local.arm64_instance_types, data.coder_parameter.instance_type.value)
-  is_spot_instance  = data.coder_parameter.spot_instance.value == "true"
-  needs_nvme_raid   = contains(local.gpu_instances_needing_raid, data.coder_parameter.instance_type.value)
-  architecture      = local.is_arm64_instance ? "arm64" : "amd64"
+  # GPU and architecture detection (from predefined list or custom parameter)
+  is_gpu_instance = (
+    local.use_custom_instance_type
+    ? data.coder_parameter.custom_is_gpu[0].value == "true"
+    : contains(local.gpu_instance_types, local.effective_instance_type)
+  )
+
+  is_arm64_instance = (
+    local.use_custom_instance_type
+    ? data.coder_parameter.custom_architecture[0].value == "arm64"
+    : contains(local.arm64_instance_types, local.effective_instance_type)
+  )
+
+  is_spot_instance = data.coder_parameter.spot_instance.value == "true"
+  needs_nvme_raid  = contains(local.gpu_instances_needing_raid, local.effective_instance_type)
+  architecture     = local.is_arm64_instance ? "arm64" : "amd64"
 
   # AMI selection
   selected_ami_id = local.is_gpu_instance ? (
@@ -262,6 +354,10 @@ locals {
   disk_size  = local.is_gpu_instance ? max(75, tonumber(data.coder_parameter.disk_size.value)) : tonumber(data.coder_parameter.disk_size.value)
   hostname   = lower(data.coder_workspace.me.name)
   linux_user = local.is_gpu_instance ? "ubuntu" : "coder"
+}
+
+provider "aws" {
+  region = local.effective_region
 }
 
 data "aws_ami" "ubuntu" {
@@ -517,7 +613,7 @@ resource "aws_security_group" "coder_workspace" {
 
 resource "aws_instance" "dev" {
   ami                    = local.selected_ami_id
-  instance_type          = data.coder_parameter.instance_type.value
+  instance_type          = local.effective_instance_type
   vpc_security_group_ids = [aws_security_group.coder_workspace.id]
   iam_instance_profile   = aws_iam_instance_profile.coder_instance_profile.name
 
@@ -561,7 +657,7 @@ resource "coder_metadata" "workspace_info" {
   resource_id = aws_instance.dev.id
   item {
     key   = "region"
-    value = data.coder_parameter.region.value
+    value = local.effective_region
   }
   item {
     key   = "instance type"
