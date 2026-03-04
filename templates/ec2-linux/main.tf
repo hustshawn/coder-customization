@@ -514,7 +514,7 @@ resource "coder_env" "anthropic_model" {
   count    = data.coder_workspace.me.start_count
   agent_id = coder_agent.dev[0].id
   name     = "ANTHROPIC_MODEL"
-  value    = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+  value    = "us.anthropic.claude-sonnet-4-6[1m]"
 }
 resource "coder_env" "anthropic_small_fast_model" {
   count    = data.coder_workspace.me.start_count
