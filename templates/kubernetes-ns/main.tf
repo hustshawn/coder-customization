@@ -6,6 +6,14 @@ terraform {
     kubernetes = {
       source = "hashicorp/kubernetes"
     }
+    aws = {
+      # aws_eks_pod_identity_association requires >= 5.44
+      source  = "hashicorp/aws"
+      version = ">= 5.44"
+    }
+    time = {
+      source = "hashicorp/time"
+    }
   }
 }
 
@@ -14,6 +22,10 @@ provider "kubernetes" {
   host                   = "https://kubernetes.default.svc"
   cluster_ca_certificate = file("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
   token                  = file("/var/run/secrets/kubernetes.io/serviceaccount/token")
+}
+
+provider "aws" {
+  region = local.cluster_region
 }
 
 data "coder_workspace" "me" {}
@@ -78,6 +90,10 @@ locals {
     "app.kubernetes.io/managed-by" = "coder"
   }
 
+  # EKS cluster this Coder deployment runs on; Pod Identity associations are created here
+  cluster_name   = "hk-auto-mode-cluster"
+  cluster_region = "ap-east-1"
+
   # Map resource size to pod resources
   size_resources = {
     "small"  = { cpu = "2", memory = "4Gi" }
@@ -134,6 +150,42 @@ resource "kubernetes_role_binding_v1" "set_workspace_permissions" {
   }
 }
 
+# IAM role assumed by the workspace pod through EKS Pod Identity.
+# TODO: replace AdministratorAccess with least-privilege policies
+resource "aws_iam_role" "workspace" {
+  name = local.name
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "pods.eks.amazonaws.com" }
+      Action    = ["sts:AssumeRole", "sts:TagSession"]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "workspace_admin" {
+  role       = aws_iam_role.workspace.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
+# Binds the IAM role to the workspace ServiceAccount. EKS injects AWS
+# credentials into any pod using that ServiceAccount.
+resource "aws_eks_pod_identity_association" "workspace" {
+  cluster_name    = local.cluster_name
+  namespace       = kubernetes_namespace_v1.workspace.metadata[0].name
+  service_account = kubernetes_service_account_v1.workspace_service_account.metadata[0].name
+  role_arn        = aws_iam_role.workspace.arn
+}
+
+# EKS needs a few seconds (measured ~8s) to learn about a new association before
+# it injects credentials at pod admission. Only waits on the first workspace
+# build, since the association survives stop/start.
+resource "time_sleep" "pod_identity_propagation" {
+  depends_on      = [aws_eks_pod_identity_association.workspace]
+  create_duration = "30s"
+}
+
 # The Coder agent allows the workspace owner
 # to connect to the pod from a web or local IDE
 resource "coder_agent" "k8s-dev" {
@@ -142,10 +194,8 @@ resource "coder_agent" "k8s-dev" {
 
   # Claude Code configuration for AWS Bedrock
   env = {
-    CLAUDE_CODE_USE_BEDROCK    = "1"
-    AWS_REGION                 = "us-east-1"
-    ANTHROPIC_MODEL            = "us.anthropic.claude-sonnet-4-20250514-v1:0"
-    ANTHROPIC_SMALL_FAST_MODEL = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    CLAUDE_CODE_USE_BEDROCK = "1"
+    AWS_REGION              = "us-east-1"
   }
 }
 
@@ -163,6 +213,53 @@ resource "coder_script" "code_server" {
     # install and start code-server
     curl -fsSL https://code-server.dev/install.sh | sh -s -- --method=standalone --prefix=/tmp/code-server --version 4.8.3
     /tmp/code-server/bin/code-server --auth none --port 13337 >/tmp/code-server.log 2>&1 &
+  EOT
+}
+
+resource "coder_script" "aws_cli" {
+  agent_id           = coder_agent.k8s-dev.id
+  display_name       = "AWS CLI"
+  icon               = "/icon/aws.svg"
+  run_on_start       = true
+  start_blocks_login = false
+  timeout            = 300
+  script             = <<-EOT
+    #!/bin/bash
+    set -e
+
+    # Skip if already setup
+    MARKER="$HOME/.setup_done/aws_cli"
+    if [ -f "$MARKER" ]; then
+      echo "AWS CLI already configured, skipping..."
+      exit 0
+    fi
+
+    # The image ships aws-cli v1, which predates EKS Pod Identity support.
+    # Install v2 under ~/.local so it shadows /usr/local/bin/aws on PATH.
+    echo "Installing AWS CLI v2..."
+    cd /tmp
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+    unzip -q -o awscliv2.zip
+    ./aws/install --install-dir "$HOME/.local/aws-cli" --bin-dir "$HOME/.local/bin" --update
+    rm -rf awscliv2.zip aws
+
+    # Add ~/.local/bin to PATH for this session
+    export PATH="$HOME/.local/bin:$PATH"
+
+    # Ensure PATH is set in shell profiles (create if needed)
+    for profile in ~/.bashrc ~/.zshrc ~/.profile; do
+      touch "$profile"
+      if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$profile"
+      fi
+    done
+
+    # Mark setup as complete
+    mkdir -p "$(dirname "$MARKER")"
+    touch "$MARKER"
+
+    echo "AWS CLI ready!"
+    aws --version
   EOT
 }
 
@@ -376,6 +473,10 @@ resource "kubernetes_pod_v1" "primary" {
   # Pod is ephemeral. Re-created when a workspace starts/stops.
   count = data.coder_workspace.me.start_count
 
+  # AWS credentials are injected at pod admission, so the association must
+  # exist and have propagated before the pod is created
+  depends_on = [time_sleep.pod_identity_propagation]
+
   metadata {
     name      = "primary"
     namespace = kubernetes_namespace_v1.workspace.metadata[0].name
@@ -509,6 +610,19 @@ resource "coder_metadata" "service_account_metadata" {
   }
 }
 
+
+resource "coder_metadata" "iam_role_metadata" {
+  resource_id = aws_iam_role.workspace.id
+  icon        = "/icon/aws.svg"
+  item {
+    key   = "role arn"
+    value = aws_iam_role.workspace.arn
+  }
+  item {
+    key   = "policy"
+    value = "AdministratorAccess"
+  }
+}
 
 resource "coder_metadata" "role_binding_metadata" {
   resource_id = kubernetes_role_binding_v1.set_workspace_permissions.id
