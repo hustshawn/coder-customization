@@ -28,7 +28,7 @@ coder templates edit "<template-name>" --icon /icon/aws.svg
 2. Terraform provisions AWS resources (EC2, IAM role, security group)
 3. CloudInit executes userdata scripts to install development tools
 4. Coder agent connects back to Coder server for workspace management
-5. IDEs (Code Server, Kiro, Jupyter) become available via Coder dashboard
+5. IDEs (Code Server, Jupyter) become available via Coder dashboard
 
 ### Template Structure
 

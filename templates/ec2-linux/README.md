@@ -116,7 +116,6 @@ Configurable EBS storage from 75GB to 2TB with GP3 volumes and encryption enable
 
 ### Pre-installed Development Tools
 - **Code Server**: Web-based VS Code accessible through the dashboard
-- **Kiro IDE**: Advanced AI-powered development environment
 - **Jupyter Notebook**: For data science and machine learning workflows
 
 > **Note**

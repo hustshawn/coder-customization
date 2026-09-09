@@ -462,38 +462,6 @@ module "code-server" {
   order    = 1
 }
 
-# Kiro CLI installation
-resource "coder_script" "kiro_cli" {
-  count              = data.coder_workspace.me.start_count
-  agent_id           = coder_agent.dev[0].id
-  display_name       = "Kiro CLI"
-  icon               = "/icon/aws.svg"
-  script             = <<-EOT
-    #!/bin/bash
-    set -e
-
-    if ! command -v kiro-cli &>/dev/null; then
-      echo "Installing Kiro CLI..."
-      curl -fsSL https://cli.kiro.dev/install | bash
-      echo "✅ Kiro CLI installed successfully!"
-    else
-      echo "Kiro CLI already installed"
-    fi
-  EOT
-  run_on_start       = true
-  run_on_stop        = false
-  start_blocks_login = false
-  timeout            = 300
-}
-
-module "kiro" {
-  count    = data.coder_workspace.me.start_count
-  source   = "registry.coder.com/coder/kiro/coder"
-  version  = "1.1.0"
-  agent_id = coder_agent.dev[0].id
-  folder   = "/home/${local.linux_user}"
-}
-
 # Claude Code environment variables for AWS Bedrock
 # Note: Claude Code module removed due to curl compatibility issues with Ubuntu 20.04
 # Claude Code is installed via npm in userdata.sh instead
