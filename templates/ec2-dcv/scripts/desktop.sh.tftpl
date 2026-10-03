@@ -1,0 +1,131 @@
+#!/bin/bash
+# Runs as ${linux_user} on every workspace start. The heavy install happens once (marker file).
+set -euo pipefail
+
+APT="sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -q -y"
+MARKER=/var/lib/coder-dcv/installed
+HOME_DIR=/home/${linux_user}
+
+if [ ! -f "$MARKER" ]; then
+  echo "First start: installing GNOME desktop, DCV and Chrome (~10 min)..."
+  $APT update
+  # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-prereq.html
+  $APT install ubuntu-desktop-minimal gdm3 dpkg-dev
+  sudo sed -i '/^\[daemon\]/a WaylandEnable=false' /etc/gdm3/custom.conf
+  # Virtual sessions run their own X server; keep gdm off the console.
+  sudo systemctl set-default multi-user.target
+  sudo systemctl stop gdm || true
+
+  # https://docs.aws.amazon.com/dcv/latest/adminguide/setting-up-installing-linux-server.html
+  cd /tmp
+  curl -fsSL -O https://d1uj6qtbmh3dt5.cloudfront.net/nice-dcv-ubuntu2404-x86_64.tgz
+  tar -xzf nice-dcv-ubuntu2404-x86_64.tgz
+  cd nice-dcv-*-ubuntu2404-x86_64
+  $APT install ./nice-dcv-server_*.deb ./nice-dcv-web-viewer_*.deb ./nice-xdcv_*.deb
+  sudo usermod -aG video dcv
+
+  curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor --yes -o /usr/share/keyrings/google-chrome.gpg
+  echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+    | sudo tee /etc/apt/sources.list.d/google-chrome.list >/dev/null
+  $APT update
+  $APT install google-chrome-stable
+
+  sudo mkdir -p "$(dirname "$MARKER")"
+  sudo touch "$MARKER"
+fi
+
+# DCV login (system auth = this user's password).
+echo "${linux_user}:${dcv_password}" | sudo chpasswd
+
+# Unattended upgrades stay on, but needrestart only lists services instead of restarting them:
+# auto-restarting dcvserver / the session launcher kills the desktop and Chrome mid-task.
+# Upgraded libraries take effect on the next workspace start.
+echo "\$nrconf{restart} = 'l';" | sudo tee /etc/needrestart/conf.d/50-coder-dcv.conf >/dev/null
+
+# No "new Ubuntu release" / "application closed unexpectedly" dialogs in the session:
+# agents can't dismiss GNOME dialogs over CDP.
+sudo sed -i 's/^Prompt=.*/Prompt=never/' /etc/update-manager/release-upgrades
+sudo sed -i 's/^enabled=1/enabled=0/' /etc/default/apport
+sudo systemctl disable --now apport.service 2>/dev/null || true
+sudo rm -f /var/crash/*
+
+# Skip the GNOME first-login wizard.
+mkdir -p "$HOME_DIR/.config" "$HOME_DIR/.local/bin" "$HOME_DIR/.config/autostart"
+echo yes > "$HOME_DIR/.config/gnome-initial-setup-done"
+
+# Chrome with CDP on 127.0.0.1:${cdp_port} and a persistent profile, restarted if it exits.
+# --password-store=basic: skip the GNOME keyring unlock dialog that would block startup.
+# --hide-crash-restore-bubble: workspace stop kills Chrome; don't nag with "Restore pages?" afterwards.
+# The loop and its Chrome end with the GNOME session that started them, and Chrome is only launched
+# when none is running on the profile: a leftover loop from an old session would otherwise call
+# Chrome every 2s, which opens a new window in the running browser each time.
+cat > "$HOME_DIR/.local/bin/agent-chrome.sh" <<'EOF'
+#!/bin/bash
+SESSION_PID=$PPID
+gsettings set org.gnome.desktop.session idle-delay 0
+gsettings set org.gnome.desktop.screensaver lock-enabled false
+while kill -0 "$SESSION_PID" 2>/dev/null; do
+  # Another Chrome still holds the profile (e.g. the old session's, shutting down): wait.
+  # Anchored on the main process so shells or child processes mentioning the flags don't match.
+  pgrep -u "$(id -u)" -f -- "^/opt/google/chrome/chrome --remote-debugging-port=${cdp_port} " >/dev/null && { sleep 2; continue; }
+  google-chrome-stable \
+    --remote-debugging-port=${cdp_port} \
+    --user-data-dir="$HOME/.config/agent-chrome" \
+    --password-store=basic \
+    --hide-crash-restore-bubble \
+    --no-first-run --no-default-browser-check &
+  CHROME_PID=$!
+  while kill -0 "$SESSION_PID" 2>/dev/null && kill -0 "$CHROME_PID" 2>/dev/null; do sleep 2; done
+  sleep 2
+done
+# Session is gone: close our Chrome (SIGTERM flushes cookies) so the next session can start its own.
+[ -n "$CHROME_PID" ] && kill "$CHROME_PID" 2>/dev/null
+EOF
+chmod +x "$HOME_DIR/.local/bin/agent-chrome.sh"
+
+cat > "$HOME_DIR/.config/autostart/agent-chrome.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Agent Chrome
+Exec=$HOME_DIR/.local/bin/agent-chrome.sh
+X-GNOME-Autostart-enabled=true
+EOF
+
+# Keep one virtual session named "desktop" alive for ${linux_user}.
+sudo tee /usr/local/bin/dcv-virtual-session.sh >/dev/null <<'EOF'
+#!/bin/bash
+while true; do
+  if ! dcv list-sessions | grep -q "'desktop'"; then
+    dcv create-session desktop --owner ${linux_user} --type virtual --storage-root %home%
+  fi
+  sleep 5
+done
+EOF
+sudo chmod +x /usr/local/bin/dcv-virtual-session.sh
+
+sudo tee /etc/systemd/system/dcv-virtual-session.service >/dev/null <<'EOF'
+[Unit]
+Description=Keep a DCV virtual session alive
+After=dcvserver.service
+Requires=dcvserver.service
+
+[Service]
+ExecStart=/usr/local/bin/dcv-virtual-session.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now dcvserver dcv-virtual-session
+
+for i in $(seq 1 40); do
+  if curl -sf -m 3 http://127.0.0.1:${cdp_port}/json/version >/dev/null; then
+    echo "Desktop ready: DCV session 'desktop', Chrome CDP on 127.0.0.1:${cdp_port}"
+    exit 0
+  fi
+  sleep 3
+done
+echo "Chrome CDP not up after 120s; check: dcv list-sessions" >&2
+exit 1

@@ -1,0 +1,42 @@
+#cloud-config
+cloud_final_modules:
+  - [scripts-user, always]
+
+hostname: ${hostname}
+
+# Disable automatic updates to prevent conflicts
+package_update: true
+package_upgrade: false
+
+# Install required packages early
+packages:
+  - curl
+  - wget
+  - unzip
+  - gawk
+
+users:
+  - name: ${linux_user}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    groups: [sudo]
+
+# Write status files
+write_files:
+  - path: /tmp/cloud-init-debug.log
+    content: |
+      Cloud-init started at $(date)
+      User: ${linux_user}
+      Hostname: ${hostname}
+    permissions: '0644'
+
+# Ensure proper permissions
+runcmd:
+  - mkdir -p /home/${linux_user}
+  - chown ${linux_user}:${linux_user} /home/${linux_user}
+  - chmod 755 /home/${linux_user}
+
+# Enable detailed logging
+output:
+  all: ">> /var/log/cloud-init-output.log"
