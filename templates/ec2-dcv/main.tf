@@ -276,6 +276,10 @@ locals {
   linux_user       = "coder"
   dcv_port         = 8443
   cdp_port         = 9222
+
+  # Claude Code and Codex both call Bedrock here, independent of the workspace region.
+  bedrock_region = "us-east-1"
+  codex_model    = "global.openai.gpt-6-sol"
 }
 
 provider "aws" {
@@ -312,7 +316,7 @@ resource "coder_agent" "dev" {
 
   env = {
     CLAUDE_CODE_USE_BEDROCK = "1"
-    AWS_REGION              = "us-east-1"
+    AWS_REGION              = local.bedrock_region
   }
 
   metadata {
@@ -364,6 +368,21 @@ resource "coder_script" "claude_code" {
   timeout            = 2400
   script = templatefile("${path.module}/scripts/claude-code.sh.tftpl", {
     cdp_port = local.cdp_port
+  })
+}
+
+resource "coder_script" "codex" {
+  count              = data.coder_workspace.me.start_count
+  agent_id           = coder_agent.dev[0].id
+  display_name       = "Codex CLI"
+  icon               = "/icon/openai.svg"
+  run_on_start       = true
+  start_blocks_login = false
+  timeout            = 2700
+  script = templatefile("${path.module}/scripts/codex.sh.tftpl", {
+    codex_model    = local.codex_model
+    bedrock_region = local.bedrock_region
+    cdp_port       = local.cdp_port
   })
 }
 

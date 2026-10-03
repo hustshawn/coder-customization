@@ -1,0 +1,47 @@
+#!/bin/bash
+# Codex CLI on Amazon Bedrock (native amazon-bedrock-runtime provider, SigV4 with the instance role)
+# + Playwright MCP pointed at the local Chrome.
+set -euo pipefail
+
+# npm comes from the Claude Code script, which itself waits for the desktop install.
+for i in $(seq 1 240); do
+  command -v npm &>/dev/null && break
+  sleep 10
+done
+
+if ! command -v codex &>/dev/null; then
+  echo "Installing Codex CLI..."
+  sudo npm install -g @openai/codex
+fi
+
+# Codex's Linux sandbox runs /usr/bin/bwrap, which Ubuntu 24.04 blocks from creating user namespaces
+# (kernel.apparmor_restrict_unprivileged_userns). Allow just bwrap instead of lifting the restriction.
+sudo tee /etc/apparmor.d/bwrap >/dev/null <<'EOF'
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/bwrap>
+}
+EOF
+sudo apparmor_parser -r /etc/apparmor.d/bwrap
+
+# Written once; later edits to the file are kept.
+CONFIG="$HOME/.codex/config.toml"
+if [ ! -f "$CONFIG" ]; then
+  mkdir -p "$(dirname "$CONFIG")"
+  cat > "$CONFIG" <<'EOF'
+model = "${codex_model}"
+model_provider = "amazon-bedrock-runtime"
+
+[model_providers.amazon-bedrock-runtime.aws]
+region = "${bedrock_region}"
+
+[mcp_servers.remote-browser]
+command = "npx"
+args = ["-y", "@playwright/mcp@latest", "--cdp-endpoint", "http://localhost:${cdp_port}"]
+EOF
+fi
+
+codex --version

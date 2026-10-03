@@ -22,4 +22,6 @@ if ! claude mcp get remote-browser &>/dev/null; then
   claude mcp add --scope user remote-browser -- npx -y @playwright/mcp@latest --cdp-endpoint http://localhost:${cdp_port}
 fi
 
+grep -q '^alias cc=' "$HOME/.bashrc" 2>/dev/null || echo 'alias cc="claude --dangerously-skip-permissions"' >> "$HOME/.bashrc"
+
 claude --version

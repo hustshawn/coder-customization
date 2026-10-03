@@ -24,14 +24,22 @@ Mac agent ──coder port-forward ───────────────
 - **Desktop (DCV)** app on the workspace page — logs straight in (random per-workspace password, passed in the app URL)
 - Chrome autostarted in the DCV session with CDP on `127.0.0.1:9222` and a persistent profile
   (`~/.config/agent-chrome`): log in to sites once in DCV, agents reuse the session; survives workspace stop/start
-- Claude Code (Bedrock) with the `remote-browser` Playwright MCP preconfigured (`--cdp-endpoint http://localhost:9222`)
+- Claude Code (Bedrock) with the `remote-browser` Playwright MCP preconfigured (`--cdp-endpoint http://localhost:9222`);
+  `cc` = `claude --dangerously-skip-permissions`
+- Codex CLI on Bedrock (native `amazon-bedrock-runtime` provider, SigV4 with the instance role, default model
+  `global.openai.gpt-6-sol`) with the same MCP. `~/.codex/config.toml` is written once and then left alone
 
 ## Use from your laptop
 
+Run the **mac setup** command shown on the workspace page once (needs a logged-in `coder` CLI):
+
 ```bash
-coder port-forward <workspace> --tcp 19222:9222
-# MCP: npx -y @playwright/mcp@latest --cdp-endpoint http://localhost:19222
+coder ssh <owner>/<workspace> -- cat /home/coder/.local/share/coder-dcv/mac-setup.sh | tr -d '\r' | bash
 ```
+
+It installs a launchd agent that keeps `coder port-forward` up (`localhost:18443` → DCV, `localhost:19222` → CDP)
+and finds the running `ec2-dcv` workspace by template on every reconnect, so replacing the workspace needs no re-setup.
+MCP: `npx -y @playwright/mcp@latest --cdp-endpoint http://localhost:19222`
 
 ## Design notes
 
@@ -49,6 +57,11 @@ coder port-forward <workspace> --tcp 19222:9222
 
 ## Caveats
 
+- **Codex does not work in Hong Kong (`ap-east-1`) workspaces**: OpenAI models on Bedrock reject callers from
+  unsupported countries/regions ("Access to OpenAI models is not allowed from unsupported countries..."), even though
+  the request goes to us-east-1. Verified 2026-10-03: same config fails from ap-east-1, works from ap-northeast-1.
+  `gpt-oss` is not an alternative (it does not support the Responses API Codex uses). Claude Code is unaffected
+- Codex's Linux sandbox needs an AppArmor profile for `/usr/bin/bwrap` on Ubuntu 24.04 (installed by the Codex script)
 - With `CODER_BLOCK_DIRECT=true` all traffic is relayed through coderd; put the workspace in the same region as
   Coder (default `ap-east-1`) to keep the DCV stream responsive
 - Deleting the workspace deletes the Chrome profile (logins)
