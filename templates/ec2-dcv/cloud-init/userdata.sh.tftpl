@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+exec > >(tee /var/log/user-data.log) 2>&1
+
+# Desktop, DCV, Chrome and Claude Code are installed by coder_scripts (logs show up in the Coder UI).
+# Start Coder agent
+sudo -u ${linux_user} bash -c '
+export HOME="/home/${linux_user}"
+export PATH="$HOME/.local/bin:$PATH"
+cd "$HOME"
+${init_script}
+' > /var/log/coder-agent.log 2>&1 &

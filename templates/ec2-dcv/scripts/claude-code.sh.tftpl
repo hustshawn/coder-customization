@@ -1,0 +1,27 @@
+#!/bin/bash
+# Claude Code (Bedrock, env set on the agent) + Playwright MCP pointed at the local Chrome.
+set -euo pipefail
+
+# The desktop script holds apt for its first-start install; wait for it to avoid lock races.
+for i in $(seq 1 180); do
+  [ -f /var/lib/coder-dcv/installed ] && break
+  sleep 10
+done
+
+if ! command -v npm &>/dev/null; then
+  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  sudo DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -q -y install nodejs
+fi
+
+if ! command -v claude &>/dev/null; then
+  echo "Installing Claude Code..."
+  sudo npm install -g @anthropic-ai/claude-code
+fi
+
+if ! claude mcp get remote-browser &>/dev/null; then
+  claude mcp add --scope user remote-browser -- npx -y @playwright/mcp@latest --cdp-endpoint http://localhost:${cdp_port}
+fi
+
+grep -q '^alias cc=' "$HOME/.bashrc" 2>/dev/null || echo 'alias cc="claude --dangerously-skip-permissions"' >> "$HOME/.bashrc"
+
+claude --version
