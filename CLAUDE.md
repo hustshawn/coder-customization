@@ -56,6 +56,12 @@ Each template follows this pattern:
 - Security group (egress-only by default)
 - IAM role with instance profile for AWS access
 
+**Kubernetes Resources (kubernetes-ns):**
+
+- Namespace, ServiceAccount and RoleBinding per workspace
+- IAM role bound to the ServiceAccount via EKS Pod Identity
+- Workspace pod run by a `kubernetes_deployment_v1` (not a bare pod, so it is rescheduled when EKS Auto Mode recycles nodes) with a home PVC
+
 ### Architecture-Aware Installations
 The userdata script detects CPU architecture (`x86_64` vs `aarch64`) to install correct binaries for AWS CLI, UV package manager, and Node.js.
 
@@ -64,6 +70,7 @@ The userdata script detects CPU architecture (`x86_64` vs `aarch64`) to install 
 | Template        | Purpose                                               |
 |-----------------|-------------------------------------------------------|
 | `ec2-linux`     | AWS EC2 instances with Ubuntu, supports GPU instances |
+| `ec2-dcv`       | AWS EC2 DCV desktop with a Chrome agents drive via CDP |
 | `kubernetes-ns` | Kubernetes namespaces with service accounts           |
 
 ## Environment Variables in Workspaces

@@ -117,6 +117,8 @@ Configurable EBS storage from 75GB to 2TB with GP3 volumes and encryption enable
 ### Pre-installed Development Tools
 - **Code Server**: Web-based VS Code accessible through the dashboard
 - **Jupyter Notebook**: For data science and machine learning workflows
+- **AWS CLI v2**, **uv** with Python and pipx, **Node.js**
+- **Claude Code** on Bedrock (`CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION=us-east-1`); no model is pinned, set it in `~/.claude/settings.json`
 
 > **Note**
 > This template is designed to be a starting point! Edit the Terraform to extend the template to support your use case.

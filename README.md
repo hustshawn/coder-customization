@@ -11,6 +11,7 @@ This repository contains Coder templates that help you quickly provision develop
 | Template                                   | Description                               |
 |--------------------------------------------|-------------------------------------------|
 | [ec2-linux](templates/ec2-linux/)          | AWS EC2 Linux workspaces with GPU support |
+| [ec2-dcv](templates/ec2-dcv/)              | AWS EC2 DCV desktop with a Chrome that coding agents drive |
 | [kubernetes-ns](templates/kubernetes-ns/)  | Kubernetes namespace-based workspaces     |
 
 ## Repository Structure
@@ -21,9 +22,15 @@ templates/
 │   ├── README.md           # Template documentation
 │   ├── main.tf             # Terraform configuration
 │   └── cloud-init/         # Cloud-init scripts
+├── ec2-dcv/
+│   ├── README.md
+│   ├── main.tf
+│   ├── cloud-init/
+│   └── scripts/            # Desktop, Chrome and agent setup scripts
 └── kubernetes-ns/
     ├── README.md
-    └── main.tf
+    ├── main.tf
+    └── coder-rbac.yaml     # Grants the Coder ServiceAccount cluster-admin
 ```
 
 ## Quick Start
