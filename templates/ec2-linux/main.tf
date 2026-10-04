@@ -478,18 +478,6 @@ resource "coder_env" "aws_region" {
   name     = "AWS_REGION"
   value    = "us-east-1"
 }
-resource "coder_env" "anthropic_model" {
-  count    = data.coder_workspace.me.start_count
-  agent_id = coder_agent.dev[0].id
-  name     = "ANTHROPIC_MODEL"
-  value    = "us.anthropic.claude-sonnet-4-6[1m]"
-}
-resource "coder_env" "anthropic_small_fast_model" {
-  count    = data.coder_workspace.me.start_count
-  agent_id = coder_agent.dev[0].id
-  name     = "ANTHROPIC_SMALL_FAST_MODEL"
-  value    = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-}
 
 # JupyterLab module with pipx properly installed in userdata
 module "jupyterlab" {
