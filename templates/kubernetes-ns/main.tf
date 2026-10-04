@@ -466,16 +466,18 @@ resource "coder_app" "code-server" {
   }
 }
 
-# Creates a pod on the workspace namepace, allowing
-# the developer to connect.
-resource "kubernetes_pod_v1" "primary" {
+# Runs the workspace pod through a Deployment so it is rescheduled when its
+# node goes away (EKS Auto Mode recycles nodes every 14 days).
+resource "kubernetes_deployment_v1" "primary" {
 
-  # Pod is ephemeral. Re-created when a workspace starts/stops.
+  # Scaled to zero when the workspace stops.
   count = data.coder_workspace.me.start_count
 
   # AWS credentials are injected at pod admission, so the association must
   # exist and have propagated before the pod is created
   depends_on = [time_sleep.pod_identity_propagation]
+
+  wait_for_rollout = false
 
   metadata {
     name      = "primary"
@@ -483,58 +485,73 @@ resource "kubernetes_pod_v1" "primary" {
     labels    = local.labels
   }
   spec {
-    service_account_name = kubernetes_service_account_v1.workspace_service_account.metadata[0].name
-
-    # Force amd64 nodes since the image doesn't support ARM
-    node_selector = {
-      "kubernetes.io/arch" = "amd64"
+    replicas = 1
+    selector {
+      match_labels = local.labels
     }
-
-    security_context {
-      run_as_user = 1000
-      fs_group    = 1000
+    # The home PVC is ReadWriteOnce, so the old pod must be gone first
+    strategy {
+      type = "Recreate"
     }
-    container {
+    template {
+      metadata {
+        labels = local.labels
+      }
+      spec {
+        service_account_name = kubernetes_service_account_v1.workspace_service_account.metadata[0].name
 
-      # Basic image with helm, kubectl, etc
-      # extend to add your own tools!
-      image = "bencdr/devops-tools"
-
-      image_pull_policy = "Always"
-      name              = "dev"
-
-      # Resource requests and limits based on instance type
-      resources {
-        requests = {
-          cpu    = local.resources.cpu
-          memory = local.resources.memory
+        # Force amd64 nodes since the image doesn't support ARM
+        node_selector = {
+          "kubernetes.io/arch" = "amd64"
         }
-        limits = {
-          cpu    = local.resources.cpu
-          memory = local.resources.memory
+
+        security_context {
+          run_as_user = 1000
+          fs_group    = 1000
         }
-      }
+        container {
 
-      # Starts the Coder agent
-      command = ["sh", "-c", coder_agent.k8s-dev.init_script]
-      env {
-        name  = "CODER_AGENT_TOKEN"
-        value = coder_agent.k8s-dev.token
-      }
+          # Basic image with helm, kubectl, etc
+          # extend to add your own tools!
+          image = "bencdr/devops-tools"
 
-      # Mounts /home/coder. Developers should keep
-      # their files here!
-      volume_mount {
-        mount_path = "/home/coder"
-        name       = "home"
-        read_only  = false
-      }
-    }
-    volume {
-      name = "home"
-      persistent_volume_claim {
-        claim_name = kubernetes_persistent_volume_claim_v1.home.metadata.0.name
-        read_only  = false
+          image_pull_policy = "Always"
+          name              = "dev"
+
+          # Resource requests and limits based on instance type
+          resources {
+            requests = {
+              cpu    = local.resources.cpu
+              memory = local.resources.memory
+            }
+            limits = {
+              cpu    = local.resources.cpu
+              memory = local.resources.memory
+            }
+          }
+
+          # Starts the Coder agent
+          command = ["sh", "-c", coder_agent.k8s-dev.init_script]
+          env {
+            name  = "CODER_AGENT_TOKEN"
+            value = coder_agent.k8s-dev.token
+          }
+
+          # Mounts /home/coder. Developers should keep
+          # their files here!
+          volume_mount {
+            mount_path = "/home/coder"
+            name       = "home"
+            read_only  = false
+          }
+        }
+        volume {
+          name = "home"
+          persistent_volume_claim {
+            claim_name = kubernetes_persistent_volume_claim_v1.home.metadata.0.name
+            read_only  = false
+          }
+        }
       }
     }
   }
@@ -563,7 +580,7 @@ resource "kubernetes_persistent_volume_claim_v1" "home" {
 
 resource "coder_metadata" "primary_metadata" {
   count       = data.coder_workspace.me.start_count
-  resource_id = kubernetes_pod_v1.primary[0].id
+  resource_id = kubernetes_deployment_v1.primary[0].id
   icon        = "https://svgur.com/i/qrK.svg"
   item {
     key   = "size"
