@@ -72,7 +72,8 @@ Templates configure Claude Code for AWS Bedrock:
 
 - `CLAUDE_CODE_USE_BEDROCK=1`
 - `AWS_REGION=us-east-1`
-- `ANTHROPIC_MODEL` and `ANTHROPIC_SMALL_FAST_MODEL` for model selection
+
+Do not hard-code model names via `ANTHROPIC_MODEL` / `ANTHROPIC_SMALL_FAST_MODEL`; let Claude Code use its defaults or the user's `~/.claude/settings.json`.
 
 ## File Locations
 
