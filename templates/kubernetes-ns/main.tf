@@ -404,6 +404,12 @@ resource "coder_script" "claude_code" {
     #!/bin/bash
     set -e
 
+    # Added before the marker check so existing workspaces pick it up too
+    for profile in ~/.bashrc ~/.zshrc; do
+      touch "$profile"
+      grep -q '^alias cc=' "$profile" || echo 'alias cc="claude --dangerously-skip-permissions"' >> "$profile"
+    done
+
     # Skip if already setup
     MARKER="$HOME/.setup_done/claude_code"
     if [ -f "$MARKER" ]; then
